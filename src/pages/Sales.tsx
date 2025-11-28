@@ -862,141 +862,170 @@ export function Sales() {
             resetForm();
           }}
           title={editingInvoice ? "Edit Sales Invoice" : "Create Sales Invoice"}
+          size="xl"
         >
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Invoice Number *
-                </label>
-                <input
-                  type="text"
-                  value={formData.invoice_number}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
-                  required
-                  placeholder="INV-001"
-                  readOnly
-                  disabled
-                />
-              </div>
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+              <h4 className="text-sm font-semibold text-gray-900 mb-4">Invoice Details</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Invoice Number *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.invoice_number}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
+                    required
+                    placeholder="INV-001"
+                    readOnly
+                    disabled
+                  />
+                </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Customer *
-                </label>
-                <select
-                  value={formData.customer_id}
-                  onChange={(e) => {
-                    const customerId = e.target.value;
-                    setFormData({ ...formData, customer_id: customerId });
-                    setSelectedChallanId('');
-                    setPendingChallans([]);
-                    if (customerId) {
-                      loadPendingChallans(customerId);
-                    }
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="">Select Customer</option>
-                  {customers.map((customer) => (
-                    <option key={customer.id} value={customer.id}>
-                      {customer.company_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Invoice Date *
-                </label>
-                <input
-                  type="date"
-                  value={formData.invoice_date}
-                  onChange={(e) => setFormData({ ...formData, invoice_date: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Payment Terms *
-                </label>
-                <select
-                  value={formData.payment_terms}
-                  onChange={(e) => setFormData({ ...formData, payment_terms: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="0">Immediate</option>
-                  <option value="15">15 Days</option>
-                  <option value="30">30 Days</option>
-                  <option value="45">45 Days</option>
-                  <option value="60">60 Days</option>
-                  <option value="advance">Advance</option>
-                  <option value="50-50">50% Adv & 50% on Delivery</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  PO Number
-                </label>
-                <input
-                  type="text"
-                  value={formData.po_number}
-                  onChange={(e) => setFormData({ ...formData, po_number: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="Customer PO Number"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Select Delivery Challan (Optional)
-                </label>
-                <select
-                  value={selectedChallanId}
-                  onChange={(e) => handleChallanSelect(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  disabled={!formData.customer_id}
-                >
-                  <option value="">No Delivery Challan / Manual Entry</option>
-                  {pendingChallans.map((challan) => (
-                    <option key={challan.id} value={challan.id}>
-                      {challan.challan_number} - {new Date(challan.challan_date).toLocaleDateString()}
-                    </option>
-                  ))}
-                </select>
-                {formData.customer_id && pendingChallans.length === 0 && (
-                  <p className="text-xs text-gray-500 mt-1">No pending delivery challans for this customer</p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Discount (Rp)
-                </label>
-                <input
-                  type="number"
-                  value={formData.discount === 0 ? '' : formData.discount}
-                  onChange={(e) => setFormData({ ...formData, discount: e.target.value === '' ? 0 : Number(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  min="0"
-                  placeholder="0"
-                />
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Invoice Date *
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.invoice_date}
+                    onChange={(e) => setFormData({ ...formData, invoice_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="border-t pt-4">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold">Invoice Items</h3>
+            <div className="grid grid-cols-2 gap-6">
+              <div className="border-r border-gray-200 pr-6">
+                <h4 className="text-sm font-semibold text-gray-900 mb-4">Customer Information</h4>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Customer *
+                    </label>
+                    <select
+                      value={formData.customer_id}
+                      onChange={(e) => {
+                        const customerId = e.target.value;
+                        setFormData({ ...formData, customer_id: customerId });
+                        setSelectedChallanId('');
+                        setPendingChallans([]);
+                        if (customerId) {
+                          loadPendingChallans(customerId);
+                        }
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      required
+                    >
+                      <option value="">Select Customer</option>
+                      {customers.map((customer) => (
+                        <option key={customer.id} value={customer.id}>
+                          {customer.company_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Select Delivery Challan (Optional)
+                    </label>
+                    <select
+                      value={selectedChallanId}
+                      onChange={(e) => handleChallanSelect(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      disabled={!formData.customer_id}
+                    >
+                      <option value="">No Delivery Challan / Manual Entry</option>
+                      {pendingChallans.map((challan) => (
+                        <option key={challan.id} value={challan.id}>
+                          {challan.challan_number} - {new Date(challan.challan_date).toLocaleDateString()}
+                        </option>
+                      ))}
+                    </select>
+                    {formData.customer_id && pendingChallans.length === 0 && (
+                      <p className="text-xs text-gray-500 mt-1">No pending delivery challans for this customer</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Notes
+                    </label>
+                    <textarea
+                      value={formData.notes}
+                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      rows={3}
+                      placeholder="Additional notes for invoice"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="pl-6">
+                <h4 className="text-sm font-semibold text-gray-900 mb-4">Payment Terms</h4>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Payment Terms *
+                    </label>
+                    <select
+                      value={formData.payment_terms}
+                      onChange={(e) => setFormData({ ...formData, payment_terms: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      required
+                    >
+                      <option value="0">Immediate</option>
+                      <option value="15">15 Days</option>
+                      <option value="30">30 Days</option>
+                      <option value="45">45 Days</option>
+                      <option value="60">60 Days</option>
+                      <option value="advance">Advance</option>
+                      <option value="50-50">50% Adv & 50% on Delivery</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      PO Number
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.po_number}
+                      onChange={(e) => setFormData({ ...formData, po_number: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      placeholder="Customer PO Number"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Discount (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      value={formData.discount === 0 ? '' : formData.discount}
+                      onChange={(e) => setFormData({ ...formData, discount: e.target.value === '' ? 0 : Number(e.target.value) })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      min="0"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t pt-6">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-sm font-semibold text-gray-900">Line Items</h4>
                 <button
                   type="button"
                   onClick={addItem}
-                  className="text-sm text-blue-600 hover:text-blue-700"
+                  className="text-sm text-blue-600 hover:text-blue-700 font-medium"
                 >
                   + Add Item
                 </button>
@@ -1174,19 +1203,7 @@ export function Sales() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Notes
-              </label>
-              <textarea
-                value={formData.notes}
-                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                rows={2}
-              />
-            </div>
-
-            <div className="flex justify-end gap-3 pt-4">
+            <div className="flex justify-end gap-3 pt-6 border-t">
               <button
                 type="button"
                 onClick={() => {

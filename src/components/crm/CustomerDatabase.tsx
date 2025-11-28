@@ -37,6 +37,7 @@ interface CustomerDatabaseProps {
 export function CustomerDatabase({ canManage }: CustomerDatabaseProps) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [modalOpen, setModalOpen] = useState(false);
@@ -65,15 +66,22 @@ export function CustomerDatabase({ canManage }: CustomerDatabaseProps) {
 
   const loadContacts = async () => {
     try {
+      setError(null);
       const { data, error } = await supabase
         .from('crm_contacts')
         .select('*')
         .order('company_name', { ascending: true });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Database error:', error);
+        throw new Error(error.message || 'Failed to load contacts');
+      }
       setContacts(data || []);
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load contacts. Please try again.';
       console.error('Error loading contacts:', error);
+      setError(errorMessage);
+      setContacts([]);
     } finally {
       setLoading(false);
     }
@@ -324,6 +332,28 @@ Bio Solutions Ltd,"789 Industrial Zone",Bandung,TRADER,022-5554321,David Chen,08
           <option value="inactive">Inactive</option>
         </select>
       </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+          <div className="flex items-start gap-3">
+            <div className="text-red-600 mt-0.5">
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-900">Error Loading Contacts</p>
+              <p className="text-sm text-red-700 mt-1">{error}</p>
+              <button
+                onClick={loadContacts}
+                className="mt-3 text-sm font-medium text-red-700 hover:text-red-800 underline"
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center items-center py-12">
