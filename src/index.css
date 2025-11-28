@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  input[type='text'],
+  input[type='email'],
+  input[type='number'],
+  input[type='date'],
+  input[type='tel'],
+  textarea,
+  select {
+    @apply py-1.5 px-3;
+  }
+
+  label {
+    @apply mb-0.5;
+  }
+
+  .form-group {
+    @apply mb-3;
+  }
+
+  .email-content {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .email-content table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0;
+    border: 2px solid #d1d5db;
+  }
+
+  .email-content th,
+  .email-content td {
+    border: 1px solid #d1d5db;
+    padding: 10px 12px;
+    text-align: left;
+  }
+
+  .email-content th {
+    background-color: #f3f4f6;
+    font-weight: 600;
+    color: #111827;
+  }
+
+  .email-content td {
+    background-color: #ffffff;
+    color: #374151;
+  }
+
+  .email-content tr:hover td {
+    background-color: #f9fafb;
+  }
+}
