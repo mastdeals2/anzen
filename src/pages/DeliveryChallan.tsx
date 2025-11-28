@@ -95,12 +95,14 @@ export function DeliveryChallan() {
   const [formData, setFormData] = useState({
     challan_number: '',
     customer_id: '',
+    sales_order_id: '',
     challan_date: new Date().toISOString().split('T')[0],
     delivery_address: '',
     vehicle_number: '',
     driver_name: '',
     notes: '',
   });
+  const [salesOrders, setSalesOrders] = useState<any[]>([]);
   const [items, setItems] = useState<Omit<ChallanItem, 'id'>[]>([{
     product_id: '',
     batch_id: '',
@@ -116,7 +118,29 @@ export function DeliveryChallan() {
     loadProducts();
     loadBatches();
     loadCompanySettings();
+    loadSalesOrders();
   }, []);
+
+  const loadSalesOrders = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('sales_orders')
+        .select(`
+          id,
+          so_number,
+          customer_id,
+          status,
+          customers(company_name)
+        `)
+        .in('status', ['stock_reserved', 'pending_delivery', 'partially_delivered'])
+        .order('so_date', { ascending: false });
+
+      if (error) throw error;
+      setSalesOrders(data || []);
+    } catch (error) {
+      console.error('Error loading sales orders:', error);
+    }
+  };
 
   const loadCompanySettings = async () => {
     try {
@@ -367,11 +391,13 @@ export function DeliveryChallan() {
       const challanData = {
         challan_number: formData.challan_number,
         customer_id: formData.customer_id,
+        sales_order_id: formData.sales_order_id || null,
         challan_date: formData.challan_date,
         delivery_address: formData.delivery_address,
         vehicle_number: formData.vehicle_number || null,
         driver_name: formData.driver_name || null,
         notes: formData.notes || null,
+        approval_status: 'pending_approval',
         created_by: user.id,
       };
 
@@ -524,6 +550,7 @@ export function DeliveryChallan() {
     setFormData({
       challan_number: '',
       customer_id: '',
+      sales_order_id: '',
       challan_date: new Date().toISOString().split('T')[0],
       delivery_address: '',
       vehicle_number: '',
@@ -688,6 +715,36 @@ export function DeliveryChallan() {
 
               <div className="col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Link to Sales Order (Optional)
+                </label>
+                <select
+                  value={formData.sales_order_id}
+                  onChange={(e) => {
+                    const soId = e.target.value;
+                    setFormData({ ...formData, sales_order_id: soId });
+                    if (soId) {
+                      const so = salesOrders.find(s => s.id === soId);
+                      if (so) {
+                        setFormData(prev => ({ ...prev, customer_id: so.customer_id }));
+                      }
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">No Sales Order</option>
+                  {salesOrders.map((so: any) => (
+                    <option key={so.id} value={so.id}>
+                      {so.so_number} - {so.customers?.company_name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Link this delivery to a specific sales order for better tracking
+                </p>
+              </div>
+
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Customer *
                 </label>
                 <select
@@ -695,6 +752,7 @@ export function DeliveryChallan() {
                   onChange={(e) => handleCustomerChange(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   required
+                  disabled={!!formData.sales_order_id}
                 >
                   <option value="">Select Customer</option>
                   {customers.map((customer) => (
@@ -703,6 +761,11 @@ export function DeliveryChallan() {
                     </option>
                   ))}
                 </select>
+                {formData.sales_order_id && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Customer auto-filled from Sales Order
+                  </p>
+                )}
               </div>
 
               <div className="col-span-2">
