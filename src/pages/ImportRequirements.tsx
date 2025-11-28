@@ -24,8 +24,7 @@ interface ImportRequirement {
     so_number: string;
   };
   customers?: {
-    customer_name: string;
-    customer_code: string;
+    company_name: string;
   };
 }
 
@@ -56,7 +55,7 @@ export default function ImportRequirements() {
           *,
           products (product_name, product_code),
           sales_orders (so_number),
-          customers (customer_name, customer_code)
+          customers (company_name)
         `)
         .order('priority', { ascending: true })
         .order('required_delivery_date', { ascending: true });
@@ -318,7 +317,7 @@ export default function ImportRequirements() {
                         <div className="text-sm font-medium text-red-600">{req.shortage_quantity}</div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900">{req.customers?.customer_name}</div>
+                        <div className="text-sm text-gray-900">{req.customers?.company_name}</div>
                         <div className="text-xs text-gray-500">{req.sales_orders?.so_number}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

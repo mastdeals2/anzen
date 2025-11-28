@@ -453,12 +453,16 @@ export default function SalesOrderForm({ onSuccess, onCancel }: SalesOrderFormPr
                 <div>
                   <label className="text-xs text-gray-600">Quantity *</label>
                   <input
-                    type="number"
+                    type="text"
                     value={item.quantity}
-                    onChange={(e) => handleItemChange(index, 'quantity', parseFloat(e.target.value) || 0)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '' || !isNaN(parseFloat(val))) {
+                        handleItemChange(index, 'quantity', val === '' ? 0 : parseFloat(val));
+                      }
+                    }}
                     className="w-full border rounded px-2 py-1 text-sm"
-                    min="0.001"
-                    step="0.001"
+                    placeholder="0"
                     required
                   />
                 </div>
@@ -466,38 +470,48 @@ export default function SalesOrderForm({ onSuccess, onCancel }: SalesOrderFormPr
                 <div>
                   <label className="text-xs text-gray-600">Unit Price</label>
                   <input
-                    type="number"
+                    type="text"
                     value={item.unit_price}
-                    onChange={(e) => handleItemChange(index, 'unit_price', parseFloat(e.target.value) || 0)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '' || !isNaN(parseFloat(val))) {
+                        handleItemChange(index, 'unit_price', val === '' ? 0 : parseFloat(val));
+                      }
+                    }}
                     className="w-full border rounded px-2 py-1 text-sm"
-                    min="0"
-                    step="0.01"
+                    placeholder="0.00"
                   />
                 </div>
 
                 <div>
                   <label className="text-xs text-gray-600">Discount %</label>
                   <input
-                    type="number"
+                    type="text"
                     value={item.discount_percent}
-                    onChange={(e) => handleItemChange(index, 'discount_percent', parseFloat(e.target.value) || 0)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '' || (!isNaN(parseFloat(val)) && parseFloat(val) >= 0 && parseFloat(val) <= 100)) {
+                        handleItemChange(index, 'discount_percent', val === '' ? 0 : parseFloat(val));
+                      }
+                    }}
                     className="w-full border rounded px-2 py-1 text-sm"
-                    min="0"
-                    max="100"
-                    step="0.01"
+                    placeholder="0"
                   />
                 </div>
 
                 <div>
                   <label className="text-xs text-gray-600">Tax %</label>
                   <input
-                    type="number"
+                    type="text"
                     value={item.tax_percent}
-                    onChange={(e) => handleItemChange(index, 'tax_percent', parseFloat(e.target.value) || 0)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '' || (!isNaN(parseFloat(val)) && parseFloat(val) >= 0 && parseFloat(val) <= 100)) {
+                        handleItemChange(index, 'tax_percent', val === '' ? 0 : parseFloat(val));
+                      }
+                    }}
                     className="w-full border rounded px-2 py-1 text-sm"
-                    min="0"
-                    max="100"
-                    step="0.01"
+                    placeholder="0"
                   />
                 </div>
               </div>
