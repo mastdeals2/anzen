@@ -656,7 +656,7 @@ export default function SalesOrders() {
                             <XCircle className="w-4 h-4" />
                           </button>
                         )}
-                        {activeTab === 'active' && profile?.role === 'admin' && ['delivered', 'cancelled'].includes(order.status) && (
+                        {activeTab === 'active' && ['admin', 'sales'].includes(profile?.role || '') && ['delivered', 'cancelled'].includes(order.status) && (
                           <button
                             onClick={() => {
                               setOrderToArchive(order.id);
@@ -668,7 +668,7 @@ export default function SalesOrders() {
                             <FileText className="w-4 h-4" />
                           </button>
                         )}
-                        {activeTab === 'archived' && profile?.role === 'admin' && (
+                        {activeTab === 'archived' && ['admin', 'sales'].includes(profile?.role || '') && (
                           <button
                             onClick={() => handleUnarchiveOrder(order.id)}
                             className="text-green-600 hover:text-green-800"
