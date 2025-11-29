@@ -62,6 +62,7 @@ interface SalesOrder {
 export default function SalesOrders() {
   const { user, profile } = useAuth();
   const { t } = useLanguage();
+  const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active');
   const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<SalesOrder[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -77,20 +78,23 @@ export default function SalesOrders() {
   const [orderToReject, setOrderToReject] = useState<string | null>(null);
   const [showPOModal, setShowPOModal] = useState(false);
   const [selectedPOUrl, setSelectedPOUrl] = useState<string | null>(null);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [archiveReason, setArchiveReason] = useState('');
+  const [orderToArchive, setOrderToArchive] = useState<string | null>(null);
 
   useEffect(() => {
     fetchSalesOrders();
     fetchCustomers();
-  }, []);
+  }, [activeTab]);
 
   useEffect(() => {
     filterOrders();
-  }, [searchTerm, statusFilter, salesOrders]);
+  }, [searchTerm, statusFilter, salesOrders, activeTab]);
 
   const fetchSalesOrders = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      let query = supabase
         .from('sales_orders')
         .select(`
           *,
@@ -117,8 +121,15 @@ export default function SalesOrders() {
               product_code
             )
           )
-        `)
-        .order('created_at', { ascending: false });
+        `);
+
+      if (activeTab === 'active') {
+        query = query.eq('is_archived', false);
+      } else {
+        query = query.eq('is_archived', true);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
 
       if (error) throw error;
       setSalesOrders(data || []);
@@ -205,6 +216,65 @@ export default function SalesOrders() {
     }
   };
 
+  const handleArchiveOrder = async () => {
+    if (!orderToArchive || !archiveReason.trim()) {
+      alert('Please enter an archive reason');
+      return;
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { error } = await supabase
+        .from('sales_orders')
+        .update({
+          is_archived: true,
+          archived_at: new Date().toISOString(),
+          archived_by: user.id,
+          archive_reason: archiveReason,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', orderToArchive);
+
+      if (error) throw error;
+
+      alert('Sales order archived successfully!');
+      setShowArchiveModal(false);
+      setArchiveReason('');
+      setOrderToArchive(null);
+      fetchSalesOrders();
+    } catch (error: any) {
+      console.error('Error archiving order:', error.message);
+      alert('Failed to archive order');
+    }
+  };
+
+  const handleUnarchiveOrder = async (orderId: string) => {
+    if (!confirm('Unarchive this sales order?')) return;
+
+    try {
+      const { error } = await supabase
+        .from('sales_orders')
+        .update({
+          is_archived: false,
+          archived_at: null,
+          archived_by: null,
+          archive_reason: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', orderId);
+
+      if (error) throw error;
+
+      alert('Sales order unarchived successfully!');
+      fetchSalesOrders();
+    } catch (error: any) {
+      console.error('Error unarchiving order:', error.message);
+      alert('Failed to unarchive order');
+    }
+  };
+
   const handleCancelOrder = async (orderId: string) => {
     const reason = prompt('Enter cancellation reason:');
     if (!reason) return;
@@ -275,9 +345,9 @@ export default function SalesOrders() {
 
       if (updateError) throw updateError;
 
-      // Call stock reservation function
+      // Call NEW stock reservation function (v2 - only reserves, doesn't deduct)
       const { error: reserveError } = await supabase
-        .rpc('fn_reserve_stock_for_so', { p_so_id: orderId });
+        .rpc('fn_reserve_stock_for_so_v2', { p_so_id: orderId });
 
       if (reserveError) {
         console.error('Error reserving stock:', reserveError);
@@ -355,6 +425,31 @@ export default function SalesOrders() {
           <Plus className="w-5 h-5" />
           New Sales Order
         </button>
+      </div>
+
+      <div className="mb-6 border-b border-gray-200">
+        <nav className="flex gap-4">
+          <button
+            onClick={() => setActiveTab('active')}
+            className={`px-4 py-2 font-medium border-b-2 transition ${
+              activeTab === 'active'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Active Orders
+          </button>
+          <button
+            onClick={() => setActiveTab('archived')}
+            className={`px-4 py-2 font-medium border-b-2 transition ${
+              activeTab === 'archived'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Archived Orders
+          </button>
+        </nav>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
@@ -541,13 +636,34 @@ export default function SalesOrders() {
                             </button>
                           </>
                         )}
-                        {!['cancelled', 'closed', 'delivered', 'rejected'].includes(order.status) && (
+                        {!['cancelled', 'closed', 'delivered', 'rejected'].includes(order.status) && activeTab === 'active' && (
                           <button
                             onClick={() => handleCancelOrder(order.id)}
                             className="text-orange-600 hover:text-orange-800"
                             title="Cancel"
                           >
                             <XCircle className="w-4 h-4" />
+                          </button>
+                        )}
+                        {activeTab === 'active' && profile?.role === 'admin' && ['delivered', 'cancelled'].includes(order.status) && (
+                          <button
+                            onClick={() => {
+                              setOrderToArchive(order.id);
+                              setShowArchiveModal(true);
+                            }}
+                            className="text-gray-600 hover:text-gray-800"
+                            title="Archive Order"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
+                        )}
+                        {activeTab === 'archived' && profile?.role === 'admin' && (
+                          <button
+                            onClick={() => handleUnarchiveOrder(order.id)}
+                            className="text-green-600 hover:text-green-800"
+                            title="Unarchive Order"
+                          >
+                            <FileCheck className="w-4 h-4" />
                           </button>
                         )}
                       </div>
@@ -711,6 +827,52 @@ export default function SalesOrders() {
                 disabled={!rejectionReason.trim()}
               >
                 Reject Order
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showArchiveModal && (
+        <Modal
+          isOpen={showArchiveModal}
+          onClose={() => {
+            setShowArchiveModal(false);
+            setArchiveReason('');
+            setOrderToArchive(null);
+          }}
+          title="Archive Sales Order"
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Archive Reason <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={archiveReason}
+                onChange={(e) => setArchiveReason(e.target.value)}
+                rows={4}
+                className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter reason for archiving this sales order (e.g., Completed and delivered, Cancelled by customer)..."
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => {
+                  setShowArchiveModal(false);
+                  setArchiveReason('');
+                  setOrderToArchive(null);
+                }}
+                className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleArchiveOrder}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                disabled={!archiveReason.trim()}
+              >
+                Archive Order
               </button>
             </div>
           </div>

@@ -122,12 +122,11 @@ export function DeliveryChallan() {
     loadProducts();
     loadBatches();
     loadCompanySettings();
-    loadSalesOrders();
   }, []);
 
-  const loadSalesOrders = async () => {
+  const loadSalesOrders = async (customerId?: string) => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('sales_orders')
         .select(`
           id,
@@ -136,8 +135,15 @@ export function DeliveryChallan() {
           status,
           customers(company_name)
         `)
-        .in('status', ['stock_reserved', 'pending_delivery', 'partially_delivered'])
+        .in('status', ['approved', 'stock_reserved', 'shortage', 'pending_delivery'])
+        .eq('is_archived', false)
         .order('so_date', { ascending: false });
+
+      if (customerId) {
+        query = query.eq('customer_id', customerId);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       setSalesOrders(data || []);
@@ -291,8 +297,54 @@ export function DeliveryChallan() {
       setFormData({
         ...formData,
         customer_id: customerId,
+        sales_order_id: '',
         delivery_address: `${customer.address}, ${customer.city}`,
       });
+      loadSalesOrders(customerId);
+    }
+  };
+
+  const handleSalesOrderChange = async (soId: string) => {
+    setFormData({ ...formData, sales_order_id: soId });
+
+    if (soId) {
+      const so = salesOrders.find(s => s.id === soId);
+      if (so) {
+        setFormData(prev => ({ ...prev, customer_id: so.customer_id }));
+
+        try {
+          const { data: soItems, error } = await supabase
+            .from('sales_order_items')
+            .select(`
+              id,
+              product_id,
+              quantity,
+              products(product_name)
+            `)
+            .eq('sales_order_id', soId);
+
+          if (error) throw error;
+
+          if (soItems && soItems.length > 0) {
+            const newItems = soItems.map(item => {
+              const productBatches = batches.filter(b => b.product_id === item.product_id && b.current_stock > 0);
+              const fifoBatch = productBatches.length > 0 ? productBatches[0] : null;
+
+              return {
+                product_id: item.product_id,
+                batch_id: fifoBatch?.id || '',
+                quantity: item.quantity,
+                pack_size: null,
+                pack_type: null,
+                number_of_packs: null,
+              };
+            });
+            setItems(newItems);
+          }
+        } catch (error) {
+          console.error('Error loading SO items:', error);
+        }
+      }
     }
   };
 
@@ -481,25 +533,77 @@ export function DeliveryChallan() {
         if (challanError) throw challanError;
         challanId = newChallan.id;
 
-        const stockUpdates = items.map(item => ({
-          batch_id: item.batch_id,
-          quantity_to_deduct: item.quantity,
-        }));
+        for (const item of items) {
+          if (formData.sales_order_id) {
+            const { error: deductError } = await supabase.rpc('fn_deduct_stock_and_release_reservation', {
+              p_so_id: formData.sales_order_id,
+              p_batch_id: item.batch_id,
+              p_product_id: item.product_id,
+              p_quantity: item.quantity,
+              p_user_id: user.id
+            });
 
-        for (const update of stockUpdates) {
-          const { error: batchError } = await supabase.rpc('update_batch_stock', {
-            p_batch_id: update.batch_id,
-            p_adjustment: -update.quantity_to_deduct,
-          });
-
-          if (batchError) {
-            const batch = batches.find(b => b.id === update.batch_id);
-            if (batch) {
-              await supabase
-                .from('batches')
-                .update({ current_stock: batch.current_stock - update.quantity_to_deduct })
-                .eq('id', update.batch_id);
+            if (deductError) {
+              console.error('Error deducting stock with reservation release:', deductError);
+              const batch = batches.find(b => b.id === item.batch_id);
+              if (batch) {
+                await supabase
+                  .from('batches')
+                  .update({ current_stock: batch.current_stock - item.quantity })
+                  .eq('id', item.batch_id);
+              }
             }
+          } else {
+            const { error: batchError } = await supabase.rpc('update_batch_stock', {
+              p_batch_id: item.batch_id,
+              p_adjustment: -item.quantity,
+            });
+
+            if (batchError) {
+              const batch = batches.find(b => b.id === item.batch_id);
+              if (batch) {
+                await supabase
+                  .from('batches')
+                  .update({ current_stock: batch.current_stock - item.quantity })
+                  .eq('id', item.batch_id);
+              }
+            }
+          }
+        }
+
+        if (formData.sales_order_id) {
+          const { data: soItems } = await supabase
+            .from('sales_order_items')
+            .select('id, quantity, delivered_quantity')
+            .eq('sales_order_id', formData.sales_order_id);
+
+          if (soItems) {
+            let allDelivered = true;
+            for (const soItem of soItems) {
+              const dcItem = items.find(i => i.product_id === soItem.id);
+              const newDeliveredQty = soItem.delivered_quantity + (dcItem?.quantity || 0);
+
+              await supabase
+                .from('sales_order_items')
+                .update({ delivered_quantity: newDeliveredQty })
+                .eq('id', soItem.id);
+
+              if (newDeliveredQty < soItem.quantity) {
+                allDelivered = false;
+              }
+            }
+
+            const newStatus = allDelivered ? 'delivered' : 'partially_delivered';
+            await supabase
+              .from('sales_orders')
+              .update({
+                status: newStatus,
+                is_archived: allDelivered,
+                archived_at: allDelivered ? new Date().toISOString() : null,
+                archived_by: allDelivered ? user.id : null,
+                archive_reason: allDelivered ? 'Delivery Challan created and all items delivered' : null
+              })
+              .eq('id', formData.sales_order_id);
           }
         }
       }
@@ -836,25 +940,23 @@ export function DeliveryChallan() {
                 </label>
                 <select
                   value={formData.sales_order_id}
-                  onChange={(e) => {
-                    const soId = e.target.value;
-                    setFormData({ ...formData, sales_order_id: soId });
-                    if (soId) {
-                      const so = salesOrders.find(s => s.id === soId);
-                      if (so) {
-                        setFormData(prev => ({ ...prev, customer_id: so.customer_id }));
-                      }
-                    }
-                  }}
+                  onChange={(e) => handleSalesOrderChange(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  disabled={!formData.customer_id}
                 >
-                  <option value="">No Sales Order</option>
+                  <option value="">No Sales Order / Manual Entry</option>
                   {salesOrders.map((so: any) => (
                     <option key={so.id} value={so.id}>
-                      {so.so_number} - {so.customers?.company_name}
+                      {so.so_number} ({so.status})
                     </option>
                   ))}
                 </select>
+                {formData.customer_id && salesOrders.length === 0 && (
+                  <p className="text-xs text-gray-500 mt-1">No active sales orders for this customer</p>
+                )}
+                {!formData.customer_id && (
+                  <p className="text-xs text-gray-500 mt-1">Select a customer first to see their sales orders</p>
+                )}
                 <p className="text-xs text-gray-500 mt-1">
                   Link this delivery to a specific sales order for better tracking
                 </p>

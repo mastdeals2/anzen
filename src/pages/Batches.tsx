@@ -15,6 +15,7 @@ interface Batch {
   import_date: string;
   import_quantity: number;
   current_stock: number;
+  reserved_stock: number;
   packaging_details: string;
   import_price: number;
   import_price_usd: number | null;
@@ -492,16 +493,31 @@ export function Batches() {
     {
       key: 'stock',
       label: 'Stock',
-      render: (batch: Batch) => (
-        <div className="flex items-center gap-2">
-          <span className={isLowStock(batch) ? 'text-orange-600 font-semibold' : ''}>
-            {batch.current_stock} {batch.products?.unit}
-          </span>
-          {isLowStock(batch) && (
-            <AlertTriangle className="w-4 h-4 text-orange-600" />
-          )}
-        </div>
-      )
+      render: (batch: Batch) => {
+        const freeStock = batch.current_stock - (batch.reserved_stock || 0);
+        return (
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <span className={isLowStock(batch) ? 'text-orange-600 font-semibold' : 'font-medium'}>
+                {batch.current_stock} {batch.products?.unit}
+              </span>
+              {isLowStock(batch) && (
+                <AlertTriangle className="w-4 h-4 text-orange-600" />
+              )}
+            </div>
+            {batch.reserved_stock > 0 && (
+              <div className="text-xs space-y-0.5">
+                <div className="text-amber-600">
+                  Reserved: {batch.reserved_stock} {batch.products?.unit}
+                </div>
+                <div className="text-green-600">
+                  Free: {freeStock} {batch.products?.unit}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
     },
     {
       key: 'pricing',
