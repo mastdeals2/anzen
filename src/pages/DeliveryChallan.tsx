@@ -185,14 +185,28 @@ export function DeliveryChallan() {
 
   const generateNextChallanNumber = async () => {
     try {
-      const prefix = 'DO';
-      const currentYear = new Date().getFullYear().toString().slice(-2);
+      // Get financial year from settings
+      const { data: settings } = await supabase
+        .from('app_settings')
+        .select('financial_year_start')
+        .limit(1)
+        .maybeSingle();
+
+      let yearCode = new Date().getFullYear().toString().slice(-2);
+
+      // If financial year is set, use it
+      if (settings?.financial_year_start) {
+        const fyYear = new Date(settings.financial_year_start).getFullYear();
+        yearCode = fyYear.toString().slice(-2);
+      }
+
+      const prefix = 'DC';
 
       // Get all challan numbers with this prefix and year to find the highest number
       const { data: allChallans } = await supabase
         .from('delivery_challans')
         .select('challan_number')
-        .like('challan_number', `${prefix}-${currentYear}%`);
+        .like('challan_number', `${prefix}-${yearCode}%`);
 
       let nextNumber = 1;
 
@@ -212,10 +226,10 @@ export function DeliveryChallan() {
       }
 
       const paddedNumber = String(nextNumber).padStart(4, '0');
-      return `${prefix}-${currentYear}-${paddedNumber}`;
+      return `${prefix}-${yearCode}-${paddedNumber}`;
     } catch (error) {
       console.error('Error generating challan number:', error);
-      return 'DO-24-0001';
+      return 'DC-25-0001';
     }
   };
 
@@ -954,11 +968,15 @@ export function DeliveryChallan() {
             setModalOpen(false);
             resetForm();
           }}
-          title={editingChallan ? `Edit DC - ${formData.challan_number}` : `Create DC - ${formData.challan_number}`}
+          title={editingChallan ? `Edit DC` : `Create Delivery Challan`}
           size="xl"
         >
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 mb-4">
+              <div className="text-sm font-semibold text-blue-900">{formData.challan_number || 'DC-XX-XXXX'}</div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Customer *
@@ -979,7 +997,7 @@ export function DeliveryChallan() {
                 </select>
               </div>
 
-              <div className="col-span-2">
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Linked Sales Order
                 </label>
@@ -1005,21 +1023,21 @@ export function DeliveryChallan() {
               </div>
             </div>
 
-            <div className="grid grid-cols-12 gap-4">
-              <div className="col-span-6">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Delivery Address *
-                </label>
-                <textarea
-                  value={formData.delivery_address}
-                  onChange={(e) => setFormData({ ...formData, delivery_address: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  rows={2}
-                  required
-                />
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Delivery Address *
+              </label>
+              <textarea
+                value={formData.delivery_address}
+                onChange={(e) => setFormData({ ...formData, delivery_address: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                rows={2}
+                required
+              />
+            </div>
 
-              <div className="col-span-3">
+            <div className="grid grid-cols-3 gap-4">
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Vehicle Number
                 </label>
@@ -1030,19 +1048,9 @@ export function DeliveryChallan() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   placeholder="B 1234 XYZ"
                 />
-                <label className="block text-sm font-medium text-gray-700 mb-1 mt-2">
-                  Date *
-                </label>
-                <input
-                  type="date"
-                  value={formData.challan_date}
-                  onChange={(e) => setFormData({ ...formData, challan_date: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  required
-                />
               </div>
 
-              <div className="col-span-3">
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Driver Name
                 </label>
@@ -1054,15 +1062,28 @@ export function DeliveryChallan() {
                   placeholder="Driver name"
                 />
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Date *
+                </label>
+                <input
+                  type="date"
+                  value={formData.challan_date}
+                  onChange={(e) => setFormData({ ...formData, challan_date: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
             </div>
 
-            <div className="border-t pt-4">
+            <div className="border-t pt-4 mt-4">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold">Items to Dispatch</h3>
+                <h3 className="text-sm font-semibold text-gray-700">Items to Dispatch</h3>
                 <button
                   type="button"
                   onClick={addItem}
-                  className="text-sm text-blue-600 hover:text-blue-700"
+                  className="text-sm px-3 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg font-medium transition-colors"
                 >
                   + Add Item
                 </button>
@@ -1229,7 +1250,7 @@ export function DeliveryChallan() {
               </div>
             </div>
 
-            <div>
+            <div className="border-t pt-4">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Notes
               </label>
@@ -1238,23 +1259,24 @@ export function DeliveryChallan() {
                 onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 rows={2}
+                placeholder="Additional notes or instructions..."
               />
             </div>
 
-            <div className="flex justify-end gap-3 pt-4">
+            <div className="flex justify-end gap-3 pt-4 border-t mt-4">
               <button
                 type="button"
                 onClick={() => {
                   setModalOpen(false);
                   resetForm();
                 }}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                className="px-5 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-sm"
               >
                 {editingChallan ? 'Update Challan' : 'Create Challan'}
               </button>
