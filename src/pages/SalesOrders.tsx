@@ -349,14 +349,22 @@ export default function SalesOrders() {
       if (updateError) throw updateError;
 
       // Call NEW stock reservation function (v2 - only reserves, doesn't deduct)
-      const { error: reserveError } = await supabase
+      const { data: reserveResult, error: reserveError } = await supabase
         .rpc('fn_reserve_stock_for_so_v2', { p_so_id: orderId });
 
       if (reserveError) {
         console.error('Error reserving stock:', reserveError);
-        alert('Order approved but stock reservation failed. Please check inventory.');
+        console.error('Supabase request failed', reserveError);
+        alert('Order approved but stock reservation failed: ' + reserveError.message);
+      } else if (reserveResult && reserveResult.length > 0) {
+        const result = reserveResult[0];
+        if (result.success) {
+          alert('✅ Sales order approved and stock fully reserved!');
+        } else {
+          alert('⚠️ Order approved with stock shortage.\n\n' + result.message + '\n\nImport requirements have been created automatically.');
+        }
       } else {
-        alert('Sales order approved and stock reserved successfully!');
+        alert('Sales order approved!');
       }
 
       fetchSalesOrders();
