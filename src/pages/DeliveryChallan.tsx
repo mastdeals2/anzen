@@ -200,13 +200,13 @@ export function DeliveryChallan() {
         yearCode = fyYear.toString().slice(-2);
       }
 
-      const prefix = 'DC';
+      const prefix = 'DO';
 
       // Get all challan numbers with this prefix and year to find the highest number
       const { data: allChallans } = await supabase
         .from('delivery_challans')
         .select('challan_number')
-        .like('challan_number', `${prefix}-${yearCode}%`);
+        .or(`challan_number.like.DO-${yearCode}%,challan_number.like.DC-${yearCode}%`);
 
       let nextNumber = 1;
 
@@ -229,7 +229,7 @@ export function DeliveryChallan() {
       return `${prefix}-${yearCode}-${paddedNumber}`;
     } catch (error) {
       console.error('Error generating challan number:', error);
-      return 'DC-25-0001';
+      return 'DO-25-0001';
     }
   };
 
@@ -968,15 +968,11 @@ export function DeliveryChallan() {
             setModalOpen(false);
             resetForm();
           }}
-          title={editingChallan ? `Edit DC` : `Create Delivery Challan`}
+          title={editingChallan ? `Edit DC - ${formData.challan_number}` : `Create DC - ${formData.challan_number}`}
           size="xl"
         >
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 mb-4">
-              <div className="text-sm font-semibold text-blue-900">{formData.challan_number || 'DC-XX-XXXX'}</div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Customer *
@@ -984,7 +980,7 @@ export function DeliveryChallan() {
                 <select
                   value={formData.customer_id}
                   onChange={(e) => handleCustomerChange(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   required
                   disabled={!!formData.sales_order_id}
                 >
@@ -1004,7 +1000,7 @@ export function DeliveryChallan() {
                 <select
                   value={formData.sales_order_id}
                   onChange={(e) => handleSalesOrderChange(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   disabled={!formData.customer_id}
                 >
                   <option value="">No Sales Order / Manual Entry</option>
@@ -1023,20 +1019,7 @@ export function DeliveryChallan() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Delivery Address *
-              </label>
-              <textarea
-                value={formData.delivery_address}
-                onChange={(e) => setFormData({ ...formData, delivery_address: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                rows={2}
-                required
-              />
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Vehicle Number
@@ -1045,7 +1028,7 @@ export function DeliveryChallan() {
                   type="text"
                   value={formData.vehicle_number}
                   onChange={(e) => setFormData({ ...formData, vehicle_number: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   placeholder="B 1234 XYZ"
                 />
               </div>
@@ -1058,7 +1041,7 @@ export function DeliveryChallan() {
                   type="text"
                   value={formData.driver_name}
                   onChange={(e) => setFormData({ ...formData, driver_name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   placeholder="Driver name"
                 />
               </div>
@@ -1071,14 +1054,41 @@ export function DeliveryChallan() {
                   type="date"
                   value={formData.challan_date}
                   onChange={(e) => setFormData({ ...formData, challan_date: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   required
                 />
               </div>
             </div>
 
-            <div className="border-t pt-4 mt-4">
-              <div className="flex items-center justify-between mb-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Delivery Address *
+                </label>
+                <textarea
+                  value={formData.delivery_address}
+                  onChange={(e) => setFormData({ ...formData, delivery_address: e.target.value })}
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  rows={2}
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Notes
+                </label>
+                <textarea
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  rows={2}
+                  placeholder="Additional notes..."
+                />
+              </div>
+            </div>
+
+            <div className="border-t pt-3 mt-3">
+              <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-gray-700">Items to Dispatch</h3>
                 <button
                   type="button"
@@ -1089,7 +1099,7 @@ export function DeliveryChallan() {
                 </button>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {items.map((item, index) => {
                   const availableBatches = batches.filter(b => b.product_id === item.product_id);
                   const selectedBatch = batches.find(b => b.id === item.batch_id);
@@ -1250,20 +1260,7 @@ export function DeliveryChallan() {
               </div>
             </div>
 
-            <div className="border-t pt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Notes
-              </label>
-              <textarea
-                value={formData.notes}
-                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                rows={2}
-                placeholder="Additional notes or instructions..."
-              />
-            </div>
-
-            <div className="flex justify-end gap-3 pt-4 border-t mt-4">
+            <div className="flex justify-end gap-3 pt-3 border-t mt-3">
               <button
                 type="button"
                 onClick={() => {
