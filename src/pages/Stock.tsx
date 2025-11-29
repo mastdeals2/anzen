@@ -52,6 +52,14 @@ export function Stock() {
 
       if (error) throw error;
 
+      // Get products with active shortages (pending/ordered import requirements)
+      const { data: shortageData } = await supabase
+        .from('import_requirements')
+        .select('product_id, shortage_quantity')
+        .in('status', ['pending', 'ordered']);
+
+      const productIdsWithShortage = new Set(shortageData?.map(s => s.product_id) || []);
+
       // Get reserved quantities for each product
       const productsWithReserved = await Promise.all(
         (data || []).map(async (product) => {
@@ -72,9 +80,9 @@ export function Stock() {
         })
       );
 
-      // Filter: show products with stock > 0 OR reserved > 0
+      // Filter: show products with stock > 0 OR reserved > 0 OR has shortage
       const filteredProducts = productsWithReserved.filter(
-        p => p.total_current_stock > 0 || p.reserved_quantity > 0
+        p => p.total_current_stock > 0 || p.reserved_quantity > 0 || productIdsWithShortage.has(p.product_id)
       );
 
       setStockSummary(filteredProducts);
