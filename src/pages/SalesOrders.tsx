@@ -280,9 +280,12 @@ export default function SalesOrders() {
     if (!reason) return;
 
     try {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) throw new Error('Not authenticated');
+
       const { error } = await supabase.rpc('fn_cancel_sales_order', {
         p_so_id: orderId,
-        p_canceller_id: user?.id,
+        p_canceller_id: currentUser.id,
         p_reason: reason
       });
 
