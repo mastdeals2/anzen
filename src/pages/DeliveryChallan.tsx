@@ -581,7 +581,15 @@ export function DeliveryChallan() {
 
         for (const item of items) {
           if (formData.sales_order_id) {
-            const { error: deductError } = await supabase.rpc('fn_deduct_stock_and_release_reservation', {
+            console.log('Calling fn_deduct_stock_and_release_reservation with:', {
+              p_so_id: formData.sales_order_id,
+              p_batch_id: item.batch_id,
+              p_product_id: item.product_id,
+              p_quantity: item.quantity,
+              p_user_id: user.id
+            });
+
+            const { data: rpcResult, error: deductError } = await supabase.rpc('fn_deduct_stock_and_release_reservation', {
               p_so_id: formData.sales_order_id,
               p_batch_id: item.batch_id,
               p_product_id: item.product_id,
@@ -590,29 +598,58 @@ export function DeliveryChallan() {
             });
 
             if (deductError) {
-              console.error('Error deducting stock with reservation release:', deductError);
-              const batch = batches.find(b => b.id === item.batch_id);
-              if (batch) {
+              console.error('RPC Error Details:', {
+                message: deductError.message,
+                details: deductError.details,
+                hint: deductError.hint,
+                code: deductError.code
+              });
+
+              const { data: currentBatch } = await supabase
+                .from('batches')
+                .select('current_stock, reserved_stock')
+                .eq('id', item.batch_id)
+                .single();
+
+              if (currentBatch) {
+                console.log('Fallback: Manually deducting stock. Current batch:', currentBatch);
                 await supabase
                   .from('batches')
-                  .update({ current_stock: batch.current_stock - item.quantity })
+                  .update({
+                    current_stock: currentBatch.current_stock - item.quantity,
+                    reserved_stock: Math.max(0, (currentBatch.reserved_stock || 0) - item.quantity)
+                  })
                   .eq('id', item.batch_id);
               }
+            } else {
+              console.log('RPC Success:', rpcResult);
             }
           } else {
-            const { error: batchError } = await supabase.rpc('update_batch_stock', {
-              p_batch_id: item.batch_id,
-              p_adjustment: -item.quantity,
-            });
+            const { data: currentBatch } = await supabase
+              .from('batches')
+              .select('current_stock, reserved_stock')
+              .eq('id', item.batch_id)
+              .single();
 
-            if (batchError) {
-              const batch = batches.find(b => b.id === item.batch_id);
-              if (batch) {
-                await supabase
-                  .from('batches')
-                  .update({ current_stock: batch.current_stock - item.quantity })
-                  .eq('id', item.batch_id);
+            if (currentBatch) {
+              const availableStock = currentBatch.current_stock - (currentBatch.reserved_stock || 0);
+              if (item.quantity > availableStock) {
+                throw new Error(`Insufficient available stock for manual DC. Available: ${availableStock}kg, Requested: ${item.quantity}kg`);
               }
+
+              await supabase
+                .from('batches')
+                .update({ current_stock: currentBatch.current_stock - item.quantity })
+                .eq('id', item.batch_id);
+
+              await supabase.from('inventory_transactions').insert({
+                transaction_type: 'delivery_challan',
+                batch_id: item.batch_id,
+                product_id: item.product_id,
+                quantity: -item.quantity,
+                transaction_date: formData.challan_date,
+                notes: `Manual DC ${formData.challan_number} created`
+              });
             }
           }
         }
@@ -620,14 +657,14 @@ export function DeliveryChallan() {
         if (formData.sales_order_id) {
           const { data: soItems } = await supabase
             .from('sales_order_items')
-            .select('id, quantity, delivered_quantity')
+            .select('id, product_id, quantity, delivered_quantity')
             .eq('sales_order_id', formData.sales_order_id);
 
           if (soItems) {
             let allDelivered = true;
             for (const soItem of soItems) {
-              const dcItem = items.find(i => i.product_id === soItem.id);
-              const newDeliveredQty = soItem.delivered_quantity + (dcItem?.quantity || 0);
+              const dcItem = items.find(i => i.product_id === soItem.product_id);
+              const newDeliveredQty = (soItem.delivered_quantity || 0) + (dcItem?.quantity || 0);
 
               await supabase
                 .from('sales_order_items')
@@ -1147,9 +1184,10 @@ export function DeliveryChallan() {
                                 <option value="">Select Batch</option>
                                 {availableBatches.map((b, idx) => {
                                   const fifoIndicator = idx === 0 ? ' 🔄 FIFO' : '';
+                                  const availableStock = b.current_stock - (b.reserved_stock || 0);
                                   return (
                                     <option key={b.id} value={b.id}>
-                                      {b.batch_number} (Stock: {b.current_stock}){fifoIndicator}
+                                      {b.batch_number} (Total: {b.current_stock}kg, Available: {availableStock}kg){fifoIndicator}
                                     </option>
                                   );
                                 })}
@@ -1183,8 +1221,18 @@ export function DeliveryChallan() {
                             </div>
                           )}
                           <div className="flex justify-between">
-                            <span className="text-gray-600">Available Stock:</span>
+                            <span className="text-gray-600">Total Stock:</span>
                             <span className="font-medium">{selectedBatch.current_stock} kg</span>
+                          </div>
+                          {selectedBatch.reserved_stock > 0 && (
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Reserved:</span>
+                              <span className="font-medium text-orange-600">{selectedBatch.reserved_stock} kg</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between border-t pt-1">
+                            <span className="text-gray-600 font-semibold">Available:</span>
+                            <span className="font-bold text-green-600">{selectedBatch.current_stock - (selectedBatch.reserved_stock || 0)} kg</span>
                           </div>
                         </div>
                       )}

@@ -59,7 +59,7 @@ export function Stock() {
             .from('stock_reservations')
             .select('reserved_quantity')
             .eq('product_id', product.product_id)
-            .eq('status', 'active');
+            .eq('is_released', false);
 
           const reserved_quantity = reservedData?.reduce((sum, r) => sum + Number(r.reserved_quantity), 0) || 0;
           const available_quantity = product.total_current_stock - reserved_quantity;
@@ -89,7 +89,7 @@ export function Stock() {
     try {
       const { data, error } = await supabase
         .from('batches')
-        .select('id, batch_number, current_stock, expiry_date, import_date')
+        .select('id, batch_number, current_stock, reserved_stock, expiry_date, import_date')
         .eq('product_id', productId)
         .eq('is_active', true)
         .gt('current_stock', 0)
@@ -97,25 +97,11 @@ export function Stock() {
 
       if (error) throw error;
 
-      // Get reserved quantities for each batch
-      const batchesWithReserved = await Promise.all(
-        (data || []).map(async (batch) => {
-          const { data: reservedData } = await supabase
-            .from('stock_reservations')
-            .select('reserved_quantity')
-            .eq('batch_id', batch.id)
-            .eq('status', 'active');
-
-          const reserved_quantity = reservedData?.reduce((sum, r) => sum + Number(r.reserved_quantity), 0) || 0;
-          const available_quantity = batch.current_stock - reserved_quantity;
-
-          return {
-            ...batch,
-            reserved_quantity,
-            available_quantity
-          };
-        })
-      );
+      const batchesWithReserved = (data || []).map(batch => ({
+        ...batch,
+        reserved_quantity: batch.reserved_stock || 0,
+        available_quantity: batch.current_stock - (batch.reserved_stock || 0)
+      }));
 
       setProductBatches(batchesWithReserved);
     } catch (error) {
