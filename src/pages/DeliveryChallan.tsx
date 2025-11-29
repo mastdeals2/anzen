@@ -330,21 +330,55 @@ export function DeliveryChallan() {
               const productBatches = batches.filter(b => b.product_id === item.product_id && b.current_stock > 0);
               const fifoBatch = productBatches.length > 0 ? productBatches[0] : null;
 
+              if (!fifoBatch) {
+                return {
+                  product_id: item.product_id,
+                  batch_id: '',
+                  quantity: item.quantity,
+                  pack_size: null,
+                  pack_type: null,
+                  number_of_packs: null,
+                };
+              }
+
+              let packSize = null;
+              let packType = null;
+              let numberOfPacks = null;
+
+              if (fifoBatch.packaging_details) {
+                const match = fifoBatch.packaging_details.match(/(\d+)\s+(\w+)s?\s+x\s+(\d+(?:\.\d+)?)kg/i);
+                if (match) {
+                  numberOfPacks = parseInt(match[1], 10);
+                  packType = match[2].toLowerCase();
+                  packSize = parseFloat(match[3]);
+                }
+              }
+
               return {
                 product_id: item.product_id,
-                batch_id: fifoBatch?.id || '',
+                batch_id: fifoBatch.id,
                 quantity: item.quantity,
-                pack_size: null,
-                pack_type: null,
-                number_of_packs: null,
+                pack_size: packSize,
+                pack_type: packType,
+                number_of_packs: numberOfPacks || 1,
               };
             });
             setItems(newItems);
           }
         } catch (error) {
           console.error('Error loading SO items:', error);
+          alert('Failed to load Sales Order items. Please try again.');
         }
       }
+    } else {
+      setItems([{
+        product_id: '',
+        batch_id: '',
+        quantity: 0,
+        pack_size: null,
+        pack_type: null,
+        number_of_packs: null,
+      }]);
     }
   };
 
@@ -439,6 +473,18 @@ export function DeliveryChallan() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const invalidItems = items.filter(item => !item.product_id || !item.batch_id || item.quantity <= 0);
+    if (invalidItems.length > 0) {
+      alert('Please select product, batch, and enter quantity for all items before saving.');
+      return;
+    }
+
+    const emptyBatches = items.filter(item => item.batch_id === '');
+    if (emptyBatches.length > 0) {
+      alert('Some items do not have a batch selected. Please select a batch for all items.');
+      return;
+    }
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -629,23 +675,51 @@ export function DeliveryChallan() {
       loadChallans();
       loadBatches();
       alert(`Delivery Challan ${editingChallan ? 'updated' : 'created'} successfully!`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving challan:', error);
-      alert('Failed to save challan. Please try again.');
+      const errorMessage = error?.message || 'Unknown error occurred';
+      if (errorMessage.includes('batch_id')) {
+        alert('Error: Invalid batch selection. Please ensure all items have a valid batch selected.');
+      } else if (errorMessage.includes('foreign key')) {
+        alert('Error: Invalid product or batch selection. Please check your selections.');
+      } else {
+        alert(`Failed to save challan: ${errorMessage}`);
+      }
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this delivery challan?')) return;
+    if (!confirm('Are you sure you want to delete this delivery challan? This will revert the linked Sales Order status.')) return;
 
     try {
+      const { data: dcData } = await supabase
+        .from('delivery_challans')
+        .select('sales_order_id, id')
+        .eq('id', id)
+        .single();
+
       const { error } = await supabase
         .from('delivery_challans')
         .delete()
         .eq('id', id);
 
       if (error) throw error;
+
+      if (dcData?.sales_order_id) {
+        await supabase
+          .from('sales_orders')
+          .update({
+            status: 'pending_delivery',
+            is_archived: false,
+            archived_at: null,
+            archived_by: null,
+            archive_reason: null
+          })
+          .eq('id', dcData.sales_order_id);
+      }
+
       loadChallans();
+      alert('Delivery Challan deleted successfully. Sales Order status has been reverted.');
     } catch (error) {
       console.error('Error deleting challan:', error);
       alert('Failed to delete challan. Please try again.');
@@ -902,67 +976,12 @@ export function DeliveryChallan() {
             setModalOpen(false);
             resetForm();
           }}
-          title={editingChallan ? "Edit Delivery Challan" : "Create Delivery Challan"}
+          title={editingChallan ? `Edit DC - ${formData.challan_number}` : `Create DC - ${formData.challan_number}`}
+          size="xl"
         >
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  DO Number *
-                </label>
-                <input
-                  type="text"
-                  value={formData.challan_number}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
-                  required
-                  placeholder="DO-24-0001"
-                  readOnly
-                  disabled
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Challan Date *
-                </label>
-                <input
-                  type="date"
-                  value={formData.challan_date}
-                  onChange={(e) => setFormData({ ...formData, challan_date: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-
-              <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Link to Sales Order (Optional)
-                </label>
-                <select
-                  value={formData.sales_order_id}
-                  onChange={(e) => handleSalesOrderChange(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  disabled={!formData.customer_id}
-                >
-                  <option value="">No Sales Order / Manual Entry</option>
-                  {salesOrders.map((so: any) => (
-                    <option key={so.id} value={so.id}>
-                      {so.so_number} ({so.status})
-                    </option>
-                  ))}
-                </select>
-                {formData.customer_id && salesOrders.length === 0 && (
-                  <p className="text-xs text-gray-500 mt-1">No active sales orders for this customer</p>
-                )}
-                {!formData.customer_id && (
-                  <p className="text-xs text-gray-500 mt-1">Select a customer first to see their sales orders</p>
-                )}
-                <p className="text-xs text-gray-500 mt-1">
-                  Link this delivery to a specific sales order for better tracking
-                </p>
-              </div>
-
-              <div className="col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Customer *
                 </label>
@@ -980,14 +999,36 @@ export function DeliveryChallan() {
                     </option>
                   ))}
                 </select>
-                {formData.sales_order_id && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    Customer auto-filled from Sales Order
-                  </p>
-                )}
               </div>
 
               <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Linked Sales Order
+                </label>
+                <select
+                  value={formData.sales_order_id}
+                  onChange={(e) => handleSalesOrderChange(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  disabled={!formData.customer_id}
+                >
+                  <option value="">No Sales Order / Manual Entry</option>
+                  {salesOrders.map((so: any) => (
+                    <option key={so.id} value={so.id}>
+                      {so.so_number} ({so.status})
+                    </option>
+                  ))}
+                </select>
+                {formData.customer_id && salesOrders.length === 0 && (
+                  <p className="text-xs text-orange-600 mt-1">⚠ No active sales orders for this customer</p>
+                )}
+                {!formData.customer_id && (
+                  <p className="text-xs text-gray-500 mt-1">Select a customer first</p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-12 gap-4">
+              <div className="col-span-6">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Delivery Address *
                 </label>
@@ -1000,7 +1041,7 @@ export function DeliveryChallan() {
                 />
               </div>
 
-              <div>
+              <div className="col-span-3">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Vehicle Number
                 </label>
@@ -1011,9 +1052,19 @@ export function DeliveryChallan() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   placeholder="B 1234 XYZ"
                 />
+                <label className="block text-sm font-medium text-gray-700 mb-1 mt-2">
+                  Date *
+                </label>
+                <input
+                  type="date"
+                  value={formData.challan_date}
+                  onChange={(e) => setFormData({ ...formData, challan_date: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  required
+                />
               </div>
 
-              <div>
+              <div className="col-span-3">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Driver Name
                 </label>
@@ -1066,40 +1117,49 @@ export function DeliveryChallan() {
                           </select>
                         </div>
 
-                        {item.product_id && availableBatches.length > 0 && (
+                        {item.product_id && (
                           <div className="space-y-1">
                             <div className="flex items-center justify-between">
                               <label className="block text-xs text-gray-600">Batch *</label>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const fifoBatch = getFIFOBatch(item.product_id);
-                                  if (fifoBatch) {
-                                    handleBatchChange(index, fifoBatch.id);
-                                  }
-                                }}
-                                className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-                                title="Select oldest batch (FIFO)"
-                              >
-                                Use FIFO
-                              </button>
+                              {availableBatches.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const fifoBatch = getFIFOBatch(item.product_id);
+                                    if (fifoBatch) {
+                                      handleBatchChange(index, fifoBatch.id);
+                                    }
+                                  }}
+                                  className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                                  title="Select oldest batch (FIFO)"
+                                >
+                                  Use FIFO
+                                </button>
+                              )}
                             </div>
-                            <select
-                              value={item.batch_id}
-                              onChange={(e) => handleBatchChange(index, e.target.value)}
-                              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                              required
-                            >
-                              <option value="">Select Batch</option>
-                              {availableBatches.map((b, idx) => {
-                                const fifoIndicator = idx === 0 ? ' 🔄 FIFO' : '';
-                                return (
-                                  <option key={b.id} value={b.id}>
-                                    {b.batch_number} (Stock: {b.current_stock}){fifoIndicator}
-                                  </option>
-                                );
-                              })}
-                            </select>
+                            {availableBatches.length > 0 ? (
+                              <select
+                                value={item.batch_id}
+                                onChange={(e) => handleBatchChange(index, e.target.value)}
+                                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                                required
+                              >
+                                <option value="">Select Batch</option>
+                                {availableBatches.map((b, idx) => {
+                                  const fifoIndicator = idx === 0 ? ' 🔄 FIFO' : '';
+                                  return (
+                                    <option key={b.id} value={b.id}>
+                                      {b.batch_number} (Stock: {b.current_stock}){fifoIndicator}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            ) : (
+                              <div className="w-full px-2 py-1.5 text-sm border border-red-300 rounded bg-red-50 text-red-700 flex items-center gap-2">
+                                <span>⚠</span>
+                                <span>No batches available for this product</span>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
