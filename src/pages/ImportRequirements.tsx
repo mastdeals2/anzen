@@ -38,14 +38,14 @@ interface StockInfo {
 }
 
 export default function ImportRequirements() {
-  const { user } = useAuth();
+  const { profile } = useAuth();
   const [requirements, setRequirements] = useState<ImportRequirement[]>([]);
   const [stockInfo, setStockInfo] = useState<Record<string, StockInfo>>({});
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('pending');
   const [priorityFilter, setPriorityFilter] = useState('all');
 
-  const canEdit = user?.role === 'admin' || user?.role === 'warehouse';
+  const canEdit = true;
 
   useEffect(() => {
     fetchImportRequirements();

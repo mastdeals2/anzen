@@ -51,9 +51,14 @@ export function ImportRequirementsTable({ requirements, onRefresh, canEdit }: Im
   }, [editingCell]);
 
   const startEditing = (id: string, field: string, currentValue: any) => {
-    if (!canEdit) return;
+    console.log('startEditing called:', { id, field, currentValue, canEdit });
+    if (!canEdit) {
+      console.log('Cannot edit - canEdit is false');
+      return;
+    }
     setEditingCell({ id, field });
     setEditValue(currentValue || '');
+    console.log('Editing cell set:', { id, field });
   };
 
   const cancelEditing = () => {
