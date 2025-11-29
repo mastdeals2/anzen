@@ -581,7 +581,7 @@ export function DeliveryChallan() {
 
         for (const item of items) {
           if (formData.sales_order_id) {
-            console.log('Calling fn_deduct_stock_and_release_reservation with:', {
+            const { error: releaseError } = await supabase.rpc('fn_deduct_stock_and_release_reservation', {
               p_so_id: formData.sales_order_id,
               p_batch_id: item.batch_id,
               p_product_id: item.product_id,
@@ -589,67 +589,8 @@ export function DeliveryChallan() {
               p_user_id: user.id
             });
 
-            const { data: rpcResult, error: deductError } = await supabase.rpc('fn_deduct_stock_and_release_reservation', {
-              p_so_id: formData.sales_order_id,
-              p_batch_id: item.batch_id,
-              p_product_id: item.product_id,
-              p_quantity: item.quantity,
-              p_user_id: user.id
-            });
-
-            if (deductError) {
-              console.error('RPC Error Details:', {
-                message: deductError.message,
-                details: deductError.details,
-                hint: deductError.hint,
-                code: deductError.code
-              });
-
-              const { data: currentBatch } = await supabase
-                .from('batches')
-                .select('current_stock, reserved_stock')
-                .eq('id', item.batch_id)
-                .single();
-
-              if (currentBatch) {
-                console.log('Fallback: Manually deducting stock. Current batch:', currentBatch);
-                await supabase
-                  .from('batches')
-                  .update({
-                    current_stock: currentBatch.current_stock - item.quantity,
-                    reserved_stock: Math.max(0, (currentBatch.reserved_stock || 0) - item.quantity)
-                  })
-                  .eq('id', item.batch_id);
-              }
-            } else {
-              console.log('RPC Success:', rpcResult);
-            }
-          } else {
-            const { data: currentBatch } = await supabase
-              .from('batches')
-              .select('current_stock, reserved_stock')
-              .eq('id', item.batch_id)
-              .single();
-
-            if (currentBatch) {
-              const availableStock = currentBatch.current_stock - (currentBatch.reserved_stock || 0);
-              if (item.quantity > availableStock) {
-                throw new Error(`Insufficient available stock for manual DC. Available: ${availableStock}kg, Requested: ${item.quantity}kg`);
-              }
-
-              await supabase
-                .from('batches')
-                .update({ current_stock: currentBatch.current_stock - item.quantity })
-                .eq('id', item.batch_id);
-
-              await supabase.from('inventory_transactions').insert({
-                transaction_type: 'delivery_challan',
-                batch_id: item.batch_id,
-                product_id: item.product_id,
-                quantity: -item.quantity,
-                transaction_date: formData.challan_date,
-                notes: `Manual DC ${formData.challan_number} created`
-              });
+            if (releaseError) {
+              console.error('Error releasing reservation:', releaseError);
             }
           }
         }
