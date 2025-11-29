@@ -200,40 +200,40 @@ export default function ImportRequirements() {
         <p className="text-gray-600 mt-1">Track and manage product import needs based on stock shortages</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="flex items-center gap-3">
-            <Package className="w-8 h-8 text-blue-600" />
-            <div>
-              <div className="text-sm text-gray-600">Total Requirements</div>
-              <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
+        <div className="bg-white p-3 md:p-4 rounded-lg shadow">
+          <div className="flex items-center gap-2 md:gap-3">
+            <Package className="w-5 h-5 md:w-6 md:h-6 text-blue-600 flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs md:text-sm text-gray-600 truncate">Total Requirements</div>
+              <div className="text-xl md:text-2xl font-bold text-gray-900">{stats.total}</div>
             </div>
           </div>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="flex items-center gap-3">
-            <AlertTriangle className="w-8 h-8 text-red-600" />
-            <div>
-              <div className="text-sm text-gray-600">High Priority</div>
-              <div className="text-2xl font-bold text-red-600">{stats.high_priority}</div>
+        <div className="bg-white p-3 md:p-4 rounded-lg shadow">
+          <div className="flex items-center gap-2 md:gap-3">
+            <AlertTriangle className="w-5 h-5 md:w-6 md:h-6 text-red-600 flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs md:text-sm text-gray-600 truncate">High Priority</div>
+              <div className="text-xl md:text-2xl font-bold text-red-600">{stats.high_priority}</div>
             </div>
           </div>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="flex items-center gap-3">
-            <Calendar className="w-8 h-8 text-yellow-600" />
-            <div>
-              <div className="text-sm text-gray-600">Pending</div>
-              <div className="text-2xl font-bold text-yellow-600">{stats.pending}</div>
+        <div className="bg-white p-3 md:p-4 rounded-lg shadow">
+          <div className="flex items-center gap-2 md:gap-3">
+            <Calendar className="w-5 h-5 md:w-6 md:h-6 text-yellow-600 flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs md:text-sm text-gray-600 truncate">Pending</div>
+              <div className="text-xl md:text-2xl font-bold text-yellow-600">{stats.pending}</div>
             </div>
           </div>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="flex items-center gap-3">
-            <TrendingUp className="w-8 h-8 text-green-600" />
-            <div>
-              <div className="text-sm text-gray-600">Ordered</div>
-              <div className="text-2xl font-bold text-green-600">{stats.ordered}</div>
+        <div className="bg-white p-3 md:p-4 rounded-lg shadow">
+          <div className="flex items-center gap-2 md:gap-3">
+            <TrendingUp className="w-5 h-5 md:w-6 md:h-6 text-green-600 flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs md:text-sm text-gray-600 truncate">Ordered</div>
+              <div className="text-xl md:text-2xl font-bold text-green-600">{stats.ordered}</div>
             </div>
           </div>
         </div>

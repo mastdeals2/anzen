@@ -463,26 +463,26 @@ export default function SalesOrders() {
         </nav>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="text-sm text-gray-600">Total Orders</div>
-          <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4 mb-6">
+        <div className="bg-white p-3 md:p-4 rounded-lg shadow">
+          <div className="text-xs md:text-sm text-gray-600 truncate">Total Orders</div>
+          <div className="text-xl md:text-2xl font-bold text-gray-900">{stats.total}</div>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="text-sm text-gray-600">Pending Approval</div>
-          <div className="text-2xl font-bold text-yellow-600">{stats.pending_approval}</div>
+        <div className="bg-white p-3 md:p-4 rounded-lg shadow">
+          <div className="text-xs md:text-sm text-gray-600 truncate">Pending Approval</div>
+          <div className="text-xl md:text-2xl font-bold text-yellow-600">{stats.pending_approval}</div>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="text-sm text-gray-600">Stock Reserved</div>
-          <div className="text-2xl font-bold text-blue-600">{stats.stock_reserved}</div>
+        <div className="bg-white p-3 md:p-4 rounded-lg shadow">
+          <div className="text-xs md:text-sm text-gray-600 truncate">Stock Reserved</div>
+          <div className="text-xl md:text-2xl font-bold text-blue-600">{stats.stock_reserved}</div>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="text-sm text-gray-600">Shortage</div>
-          <div className="text-2xl font-bold text-orange-600">{stats.shortage}</div>
+        <div className="bg-white p-3 md:p-4 rounded-lg shadow">
+          <div className="text-xs md:text-sm text-gray-600 truncate">Shortage</div>
+          <div className="text-xl md:text-2xl font-bold text-orange-600">{stats.shortage}</div>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="text-sm text-gray-600">Delivered</div>
-          <div className="text-2xl font-bold text-green-600">{stats.delivered}</div>
+        <div className="bg-white p-3 md:p-4 rounded-lg shadow">
+          <div className="text-xs md:text-sm text-gray-600 truncate">Delivered</div>
+          <div className="text-xl md:text-2xl font-bold text-green-600">{stats.delivered}</div>
         </div>
       </div>
 

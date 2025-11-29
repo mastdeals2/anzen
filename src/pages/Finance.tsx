@@ -303,35 +303,35 @@ export function Finance() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow p-6 text-white">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4">
+          <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow p-3 md:p-4 text-white">
             <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-blue-100">Total Expenses</p>
-                <p className="text-2xl font-bold mt-1">Rp {stats.totalExpenses.toLocaleString('id-ID')}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs md:text-sm text-blue-100 truncate">Total Expenses</p>
+                <p className="text-lg md:text-2xl font-bold mt-0.5">Rp {stats.totalExpenses.toLocaleString('id-ID')}</p>
               </div>
-              <DollarSign className="w-8 h-8 text-blue-200" />
+              <DollarSign className="w-5 h-5 md:w-6 md:h-6 text-blue-200 flex-shrink-0 ml-2" />
             </div>
           </div>
 
-          <div className="bg-red-50 rounded-lg shadow p-6">
-            <p className="text-sm text-red-600">Duty</p>
-            <p className="text-2xl font-bold text-red-600 mt-1">Rp {stats.duty.toLocaleString('id-ID')}</p>
+          <div className="bg-red-50 rounded-lg shadow p-3 md:p-4">
+            <p className="text-xs md:text-sm text-red-600 truncate">Duty</p>
+            <p className="text-lg md:text-2xl font-bold text-red-600 mt-0.5">Rp {stats.duty.toLocaleString('id-ID')}</p>
           </div>
 
-          <div className="bg-blue-50 rounded-lg shadow p-6">
-            <p className="text-sm text-blue-600">Freight</p>
-            <p className="text-2xl font-bold text-blue-600 mt-1">Rp {stats.freight.toLocaleString('id-ID')}</p>
+          <div className="bg-blue-50 rounded-lg shadow p-3 md:p-4">
+            <p className="text-xs md:text-sm text-blue-600 truncate">Freight</p>
+            <p className="text-lg md:text-2xl font-bold text-blue-600 mt-0.5">Rp {stats.freight.toLocaleString('id-ID')}</p>
           </div>
 
-          <div className="bg-yellow-50 rounded-lg shadow p-6">
-            <p className="text-sm text-yellow-600">Operations</p>
-            <p className="text-2xl font-bold text-yellow-600 mt-1">Rp {stats.operations.toLocaleString('id-ID')}</p>
+          <div className="bg-yellow-50 rounded-lg shadow p-3 md:p-4">
+            <p className="text-xs md:text-sm text-yellow-600 truncate">Operations</p>
+            <p className="text-lg md:text-2xl font-bold text-yellow-600 mt-0.5">Rp {stats.operations.toLocaleString('id-ID')}</p>
           </div>
 
-          <div className="bg-gray-50 rounded-lg shadow p-6">
-            <p className="text-sm text-gray-600">Other</p>
-            <p className="text-2xl font-bold text-gray-600 mt-1">Rp {stats.other.toLocaleString('id-ID')}</p>
+          <div className="bg-gray-50 rounded-lg shadow p-3 md:p-4">
+            <p className="text-xs md:text-sm text-gray-600 truncate">Other</p>
+            <p className="text-lg md:text-2xl font-bold text-gray-600 mt-0.5">Rp {stats.other.toLocaleString('id-ID')}</p>
           </div>
         </div>
 
