@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Layout } from '../components/Layout';
 import { AlertTriangle, TrendingUp, Package, Calendar, FileText } from 'lucide-react';
+import { ImportRequirementsTable } from '../components/ImportRequirementsTable';
+import { useAuth } from '../contexts/AuthContext';
 
 interface ImportRequirement {
   id: string;
@@ -36,11 +38,14 @@ interface StockInfo {
 }
 
 export default function ImportRequirements() {
+  const { user } = useAuth();
   const [requirements, setRequirements] = useState<ImportRequirement[]>([]);
   const [stockInfo, setStockInfo] = useState<Record<string, StockInfo>>({});
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('pending');
   const [priorityFilter, setPriorityFilter] = useState('all');
+
+  const canEdit = user?.role === 'admin' || user?.role === 'warehouse';
 
   useEffect(() => {
     fetchImportRequirements();
@@ -259,98 +264,24 @@ export default function ImportRequirements() {
             <option value="medium">Medium Priority</option>
             <option value="low">Low Priority</option>
           </select>
+
+          {canEdit && (
+            <div className="ml-auto text-sm text-gray-600 flex items-center gap-2">
+              <Package className="w-4 h-4" />
+              Click any cell to edit
+            </div>
+          )}
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Priority</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Current Stock</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Shortage Qty</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer / SO</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Required Date</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Days Left</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {loading ? (
-                <tr>
-                  <td colSpan={9} className="px-6 py-4 text-center text-gray-500">
-                    Loading...
-                  </td>
-                </tr>
-              ) : filteredRequirements.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="px-6 py-4 text-center text-gray-500">
-                    No import requirements found
-                  </td>
-                </tr>
-              ) : (
-                filteredRequirements.map((req) => {
-                  const stock = stockInfo[req.product_id];
-                  const daysLeft = getDaysUntilDelivery(req.required_delivery_date);
-
-                  return (
-                    <tr key={req.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {getPriorityBadge(req.priority)}
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm font-medium text-gray-900">{req.products?.product_name}</div>
-                        <div className="text-xs text-gray-500">{req.products?.product_code}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {stock ? (
-                          <div className="text-sm">
-                            <div>Total: <span className="font-medium">{stock.total_stock}</span></div>
-                            <div className="text-xs text-gray-500">Free: {stock.free_stock}</div>
-                          </div>
-                        ) : (
-                          <span className="text-gray-400">-</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-red-600">{req.shortage_quantity}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900">{req.customers?.company_name}</div>
-                        <div className="text-xs text-gray-500">{req.sales_orders?.so_number}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {new Date(req.required_delivery_date).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className={`text-sm ${getUrgencyColor(daysLeft)}`}>
-                          {daysLeft > 0 ? `${daysLeft} days` : 'Overdue'}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {getStatusBadge(req.status)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <select
-                          value={req.status}
-                          onChange={(e) => handleStatusChange(req.id, e.target.value)}
-                          className="border rounded px-2 py-1 text-sm"
-                        >
-                          <option value="pending">Pending</option>
-                          <option value="ordered">Ordered</option>
-                          <option value="partially_received">Partially Received</option>
-                          <option value="received">Received</option>
-                          <option value="cancelled">Cancelled</option>
-                        </select>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+        {loading ? (
+          <div className="p-8 text-center text-gray-500">Loading...</div>
+        ) : (
+          <ImportRequirementsTable
+            requirements={filteredRequirements}
+            onRefresh={fetchImportRequirements}
+            canEdit={canEdit}
+          />
+        )}
       </div>
 
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">

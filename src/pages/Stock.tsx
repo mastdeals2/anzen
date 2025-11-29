@@ -58,7 +58,12 @@ export function Stock() {
         .select('product_id, shortage_quantity')
         .in('status', ['pending', 'ordered']);
 
-      const productIdsWithShortage = new Set(shortageData?.map(s => s.product_id) || []);
+      // Build map of product_id -> total shortage quantity
+      const shortageMap = new Map<string, number>();
+      shortageData?.forEach(s => {
+        const current = shortageMap.get(s.product_id) || 0;
+        shortageMap.set(s.product_id, current + Number(s.shortage_quantity));
+      });
 
       // Get reserved quantities for each product
       const productsWithReserved = await Promise.all(
@@ -70,19 +75,23 @@ export function Stock() {
             .eq('is_released', false);
 
           const reserved_quantity = reservedData?.reduce((sum, r) => sum + Number(r.reserved_quantity), 0) || 0;
+          const shortage_quantity = shortageMap.get(product.product_id) || 0;
+
+          // If there's shortage, show negative reserved (deficit)
+          const displayed_reserved = shortage_quantity > 0 ? -shortage_quantity : reserved_quantity;
           const available_quantity = product.total_current_stock - reserved_quantity;
 
           return {
             ...product,
-            reserved_quantity,
+            reserved_quantity: displayed_reserved,
             available_quantity
           };
         })
       );
 
-      // Filter: show products with stock > 0 OR reserved > 0 OR has shortage
+      // Filter: show products with stock > 0 OR reserved != 0 (including negative) OR has shortage
       const filteredProducts = productsWithReserved.filter(
-        p => p.total_current_stock > 0 || p.reserved_quantity > 0 || productIdsWithShortage.has(p.product_id)
+        p => p.total_current_stock > 0 || p.reserved_quantity !== 0 || shortageMap.has(p.product_id)
       );
 
       setStockSummary(filteredProducts);
@@ -167,11 +176,21 @@ export function Stock() {
     {
       key: 'reserved',
       label: 'Reserved',
-      render: (item: StockSummary) => (
-        <span className="text-orange-600 font-medium">
-          {item.reserved_quantity > 0 ? `${item.reserved_quantity.toLocaleString()} ${item.unit}` : '-'}
-        </span>
-      )
+      render: (item: StockSummary) => {
+        if (item.reserved_quantity === 0) return <span className="text-gray-400">-</span>;
+        if (item.reserved_quantity < 0) {
+          return (
+            <span className="text-red-600 font-semibold">
+              {item.reserved_quantity.toLocaleString()} {item.unit}
+            </span>
+          );
+        }
+        return (
+          <span className="text-orange-600 font-medium">
+            {item.reserved_quantity.toLocaleString()} {item.unit}
+          </span>
+        );
+      }
     },
     {
       key: 'available',
