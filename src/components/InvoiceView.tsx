@@ -313,7 +313,7 @@ export function InvoiceView({ invoice, items, onClose }: InvoiceViewProps) {
                 <div className="space-y-1 text-xs print:text-[10px] print:space-y-0 flex-1">
                   <div>
                     <span className="font-bold">{language === 'id' ? 'Company Name:' : 'Company Name:'}</span>
-<p className="font-semibold">{customer?.company_name || ''}</p>                  </div>
+<span className="font-semibold">{customer?.company_name || ''}</span>                  </div>
                   <div className="ml-4 mb-1">
                     <p className="font-semibold">{customer?.company_name || ''}</p>
                   </div>
