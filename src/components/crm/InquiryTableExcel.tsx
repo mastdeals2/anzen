@@ -675,35 +675,24 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                   </div>
                 </th>
 
-                {/* Company - Sortable */}
-                <th
-                  onClick={() => handleSort('company_name')}
-                  className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 min-w-[150px] cursor-pointer hover:bg-gray-100 select-none"
-                >
-                  <div className="flex items-center gap-1">
-                    <span>Company</span>
-                    {getSortIcon('company_name')}
-                  </div>
-                </th>
-
-                {/* Status with filter */}
-                <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 relative">
+                {/* Company - Sortable with Filter */}
+                <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 min-w-[150px] relative">
                   <div className="flex items-center justify-between gap-2">
-                    <span>Status</span>
+                    <span>Company</span>
                     <button
-                      onClick={() => setOpenFilter(openFilter === 'status' ? null : 'status')}
-                      className={`p-0.5 rounded hover:bg-gray-200 ${isColumnFiltered('status') ? 'text-blue-600' : ''}`}
+                      onClick={() => setOpenFilter(openFilter === 'company_name' ? null : 'company_name')}
+                      className={`p-0.5 rounded hover:bg-gray-200 ${isColumnFiltered('company_name') ? 'text-blue-600' : ''}`}
                     >
                       <ChevronDown className="w-4 h-4" />
                     </button>
                   </div>
-                  {openFilter === 'status' && (
-                    <div ref={filterRef} className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-50 w-56">
+                  {openFilter === 'company_name' && (
+                    <div ref={filterRef} className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-50 w-64">
                       <div className="p-2 border-b border-gray-200 flex items-center justify-between">
-                        <span className="text-xs font-medium">Filter Status</span>
-                        {isColumnFiltered('status') && (
+                        <span className="text-xs font-medium">Filter Company</span>
+                        {isColumnFiltered('company_name') && (
                           <button
-                            onClick={() => clearColumnFilter('status')}
+                            onClick={() => clearColumnFilter('company_name')}
                             className="text-xs text-blue-600 hover:text-blue-700"
                           >
                             Clear
@@ -711,14 +700,80 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                         )}
                       </div>
                       <div className="p-2 max-h-64 overflow-y-auto">
-                        {statusOptions.map(option => {
-                          const isSelected = filters.find(f => f.column === 'status')?.values.includes(option.value);
+                        {getUniqueValues('company_name').map(company => {
+                          const isSelected = filters.find(f => f.column === 'company_name')?.values.includes(String(company));
+                          return (
+                            <label key={String(company)} className="flex items-center gap-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleFilter('company_name', String(company))}
+                                className="rounded border-gray-300"
+                              />
+                              <span className="text-sm">{String(company)}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </th>
+
+                {/* Mail Subject - Sortable */}
+                <th
+                  onClick={() => handleSort('mail_subject')}
+                  className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 min-w-[180px] cursor-pointer hover:bg-gray-100 select-none"
+                >
+                  <div className="flex items-center gap-1">
+                    <span>Mail Subject</span>
+                    {getSortIcon('mail_subject')}
+                  </div>
+                </th>
+
+                {/* ACE ERP No - Sortable */}
+                <th
+                  onClick={() => handleSort('aceerp_no')}
+                  className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 cursor-pointer hover:bg-gray-100 select-none"
+                >
+                  <div className="flex items-center gap-1">
+                    <span>ACE ERP#</span>
+                    {getSortIcon('aceerp_no')}
+                  </div>
+                </th>
+
+                {/* Pipeline Status with filter */}
+                <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 relative min-w-[130px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>Pipeline</span>
+                    <button
+                      onClick={() => setOpenFilter(openFilter === 'pipeline_status' ? null : 'pipeline_status')}
+                      className={`p-0.5 rounded hover:bg-gray-200 ${isColumnFiltered('pipeline_status') ? 'text-blue-600' : ''}`}
+                    >
+                      <ChevronDown className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {openFilter === 'pipeline_status' && (
+                    <div ref={filterRef} className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-50 w-56">
+                      <div className="p-2 border-b border-gray-200 flex items-center justify-between">
+                        <span className="text-xs font-medium">Filter Pipeline</span>
+                        {isColumnFiltered('pipeline_status') && (
+                          <button
+                            onClick={() => clearColumnFilter('pipeline_status')}
+                            className="text-xs text-blue-600 hover:text-blue-700"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      <div className="p-2 max-h-64 overflow-y-auto">
+                        {pipelineStatusOptions.map(option => {
+                          const isSelected = filters.find(f => f.column === 'pipeline_status')?.values.includes(option.value);
                           return (
                             <label key={option.value} className="flex items-center gap-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
                               <input
                                 type="checkbox"
                                 checked={isSelected}
-                                onChange={() => toggleFilter('status', option.value)}
+                                onChange={() => toggleFilter('pipeline_status', option.value)}
                                 className="rounded border-gray-300"
                               />
                               <span className="text-sm">{option.label}</span>
@@ -728,6 +783,27 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                       </div>
                     </div>
                   )}
+                </th>
+
+                {/* Our Side */}
+                <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 min-w-[120px]">
+                  <span>Our Side</span>
+                </th>
+
+                {profile?.role === 'admin' && (
+                  <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300">
+                    <span>P.Price</span>
+                  </th>
+                )}
+
+                {/* Offered Price */}
+                <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300">
+                  <span>O.Price</span>
+                </th>
+
+                {/* Delivery Date */}
+                <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300">
+                  <span>Delivery</span>
                 </th>
 
                 {/* Priority with filter */}
@@ -790,7 +866,7 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
             <tbody>
               {filteredData.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-3 py-8 text-center text-gray-500">
+                  <td colSpan={18} className="px-3 py-8 text-center text-gray-500">
                     No inquiries found
                   </td>
                 </tr>
@@ -922,8 +998,44 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                       )}
                     </td>
 
+                    {/* Company */}
                     <td className="px-3 py-2 border-r border-gray-200">
-                      {editingCell?.id === inquiry.id && editingCell?.field === 'company_name' ? (
+                      <div className="font-medium">{inquiry.company_name}</div>
+                    </td>
+
+                    {/* Mail Subject */}
+                    <td className="px-3 py-2 border-r border-gray-200">
+                      {editingCell?.id === inquiry.id && editingCell?.field === 'mail_subject' ? (
+                        <input
+                          type="text"
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onBlur={saveEdit}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveEdit();
+                            if (e.key === 'Escape') setEditingCell(null);
+                          }}
+                          className="w-full px-2 py-1 border-2 border-blue-500 rounded focus:outline-none text-xs"
+                          autoFocus
+                        />
+                      ) : (
+                        <div
+                          onDoubleClick={() => startEditing(inquiry, 'mail_subject')}
+                          className="cursor-text hover:bg-yellow-50 px-2 py-1 rounded text-xs"
+                          title={inquiry.mail_subject || ''}
+                        >
+                          {inquiry.mail_subject ? (
+                            <div className="line-clamp-2">{inquiry.mail_subject}</div>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </div>
+                      )}
+                    </td>
+
+                    {/* ACE ERP No */}
+                    <td className="px-3 py-2 border-r border-gray-200">
+                      {editingCell?.id === inquiry.id && editingCell?.field === 'aceerp_no' ? (
                         <input
                           type="text"
                           value={editValue}
@@ -938,27 +1050,150 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                         />
                       ) : (
                         <div
-                          onDoubleClick={() => startEditing(inquiry, 'company_name')}
-                          className="cursor-text hover:bg-yellow-50 px-2 py-1 rounded"
+                          onDoubleClick={() => canManage && startEditing(inquiry, 'aceerp_no')}
+                          className={canManage ? "cursor-text hover:bg-yellow-50 px-2 py-1 rounded" : "px-2 py-1"}
                         >
-                          {inquiry.company_name}
+                          {inquiry.aceerp_no || (canManage ? <span className="text-gray-400 text-xs">Click to add</span> : '-')}
                         </div>
                       )}
                     </td>
 
+                    {/* Pipeline Status */}
                     <td className="px-3 py-2 border-r border-gray-200">
                       <select
-                        value={inquiry.status}
-                        onChange={(e) => updateStatus(inquiry, e.target.value)}
+                        value={inquiry.pipeline_status || 'new'}
+                        onChange={(e) => updatePipelineStatus(inquiry, e.target.value)}
                         disabled={!canManage}
-                        className="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none cursor-pointer"
+                        className="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none cursor-pointer bg-white"
                       >
-                        {statusOptions.map(opt => (
+                        {pipelineStatusOptions.map(opt => (
                           <option key={opt.value} value={opt.value}>{opt.label}</option>
                         ))}
                       </select>
                     </td>
 
+                    {/* Our Side */}
+                    <td className="px-3 py-2 border-r border-gray-200">
+                      <div className="flex items-center justify-between gap-1">
+                        <OurSideChips inquiry={inquiry} />
+                        {canManage && (
+                          <div className="flex gap-0.5">
+                            {inquiry.price_required && !inquiry.price_sent_at && (
+                              <button
+                                onClick={() => markRequirementSent(inquiry, 'price')}
+                                className="p-1 text-green-600 hover:bg-green-50 rounded"
+                                title="Mark Price Sent"
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                            )}
+                            {inquiry.coa_required && !inquiry.coa_sent_at && (
+                              <button
+                                onClick={() => markRequirementSent(inquiry, 'coa')}
+                                className="p-1 text-green-600 hover:bg-green-50 rounded"
+                                title="Mark COA Sent"
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Purchase Price (Admin Only) */}
+                    {profile?.role === 'admin' && (
+                      <td className="px-3 py-2 border-r border-gray-200">
+                        {editingCell?.id === inquiry.id && editingCell?.field === 'purchase_price' ? (
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onBlur={saveEdit}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') saveEdit();
+                              if (e.key === 'Escape') setEditingCell(null);
+                            }}
+                            className="w-full px-2 py-1 border-2 border-blue-500 rounded focus:outline-none text-xs"
+                            autoFocus
+                          />
+                        ) : (
+                          <div
+                            onDoubleClick={() => startEditing(inquiry, 'purchase_price')}
+                            className="cursor-text hover:bg-yellow-50 px-2 py-1 rounded text-xs"
+                          >
+                            {inquiry.purchase_price ?
+                              `$${inquiry.purchase_price.toLocaleString('en-US', { minimumFractionDigits: 2 })}` :
+                              <span className="text-gray-400">Click to add</span>
+                            }
+                          </div>
+                        )}
+                      </td>
+                    )}
+
+                    {/* Offered Price */}
+                    <td className="px-3 py-2 border-r border-gray-200">
+                      {editingCell?.id === inquiry.id && editingCell?.field === 'offered_price' ? (
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onBlur={saveEdit}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveEdit();
+                            if (e.key === 'Escape') setEditingCell(null);
+                          }}
+                          className="w-full px-2 py-1 border-2 border-blue-500 rounded focus:outline-none text-xs"
+                          autoFocus
+                        />
+                      ) : (
+                        <div
+                          onDoubleClick={() => canManage && startEditing(inquiry, 'offered_price')}
+                          className={canManage ? "cursor-text hover:bg-yellow-50 px-2 py-1 rounded text-xs" : "px-2 py-1 text-xs"}
+                        >
+                          {inquiry.offered_price ?
+                            `$${inquiry.offered_price.toLocaleString('en-US', { minimumFractionDigits: 2 })}` :
+                            (canManage ? <span className="text-gray-400">Click to add</span> : '-')
+                          }
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Delivery Date */}
+                    <td className="px-3 py-2 border-r border-gray-200">
+                      {editingCell?.id === inquiry.id && editingCell?.field === 'delivery_date' ? (
+                        <input
+                          type="date"
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onBlur={saveEdit}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveEdit();
+                            if (e.key === 'Escape') setEditingCell(null);
+                          }}
+                          className="w-full px-2 py-1 border-2 border-blue-500 rounded focus:outline-none text-xs"
+                          autoFocus
+                        />
+                      ) : (
+                        <div
+                          onDoubleClick={() => canManage && startEditing(inquiry, 'delivery_date')}
+                          className={canManage ? "cursor-text hover:bg-yellow-50 px-2 py-1 rounded text-xs whitespace-nowrap" : "px-2 py-1 text-xs whitespace-nowrap"}
+                        >
+                          {inquiry.delivery_date ?
+                            new Date(inquiry.delivery_date).toLocaleDateString('en-GB', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric'
+                            }) :
+                            (canManage ? <span className="text-gray-400">Click to add</span> : '-')
+                          }
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Priority */}
                     <td className="px-3 py-2 border-r border-gray-200">
                       <select
                         value={inquiry.priority}
@@ -972,6 +1207,7 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                       </select>
                     </td>
 
+                    {/* Remarks */}
                     <td className="px-3 py-2 border-r border-gray-200">
                       {editingCell?.id === inquiry.id && editingCell?.field === 'remarks' ? (
                         <input
