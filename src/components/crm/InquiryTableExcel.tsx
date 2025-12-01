@@ -4,11 +4,15 @@ import * as XLSX from 'xlsx';
 import {
   ChevronDown, X, Mail, Phone, FileText, Calendar,
   Flame, ArrowUp, Minus, Send, MessageSquare, CheckSquare,
-  Download, FileSpreadsheet, ArrowUpDown, ArrowDown
+  Download, FileSpreadsheet, ArrowUpDown, ArrowDown, Check, XCircle
 } from 'lucide-react';
 import { Modal } from '../Modal';
 import { GmailLikeComposer } from './GmailLikeComposer';
 import { TaskFormModal } from '../tasks/TaskFormModal';
+import { OurSideChips } from './OurSideChips';
+import { PipelineStatusBadge, pipelineStatusOptions } from './PipelineStatusBadge';
+import { LostReasonModal } from './LostReasonModal';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface Inquiry {
   id: string;
@@ -24,12 +28,29 @@ interface Inquiry {
   contact_email: string | null;
   contact_phone: string | null;
   email_subject?: string | null;
+  mail_subject?: string | null;
   status: string;
+  pipeline_status?: string;
   priority: string;
   coa_sent: boolean;
   msds_sent: boolean;
   sample_sent: boolean;
   price_quoted: boolean;
+  price_required?: boolean;
+  coa_required?: boolean;
+  sample_required?: boolean;
+  agency_letter_required?: boolean;
+  price_sent_at?: string | null;
+  coa_sent_at?: string | null;
+  sample_sent_at?: string | null;
+  agency_letter_sent_at?: string | null;
+  aceerp_no?: string | null;
+  purchase_price?: number | null;
+  purchase_price_currency?: string;
+  offered_price?: number | null;
+  offered_price_currency?: string;
+  delivery_date?: string | null;
+  delivery_terms?: string | null;
   remarks: string | null;
 }
 
@@ -45,6 +66,7 @@ interface InquiryTableProps {
 }
 
 export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTableProps) {
+  const { profile } = useAuth();
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [filters, setFilters] = useState<ColumnFilter[]>([]);
   const [openFilter, setOpenFilter] = useState<string | null>(null);
@@ -61,6 +83,8 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
   const [followUpNotes, setFollowUpNotes] = useState('');
   const [createTaskModalOpen, setCreateTaskModalOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [lostReasonModalOpen, setLostReasonModalOpen] = useState(false);
+  const [inquiryToMarkLost, setInquiryToMarkLost] = useState<Inquiry | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
 
   const statusOptions = [
@@ -362,6 +386,42 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
       onRefresh();
     } catch (error) {
       console.error('Error updating priority:', error);
+    }
+  };
+
+  const updatePipelineStatus = async (inquiry: Inquiry, newStatus: string) => {
+    if (newStatus === 'lost') {
+      setInquiryToMarkLost(inquiry);
+      setLostReasonModalOpen(true);
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('crm_inquiries')
+        .update({ pipeline_status: newStatus })
+        .eq('id', inquiry.id);
+
+      if (error) throw error;
+      onRefresh();
+    } catch (error) {
+      console.error('Error updating pipeline status:', error);
+    }
+  };
+
+  const markRequirementSent = async (inquiry: Inquiry, requirementType: 'price' | 'coa' | 'sample' | 'agency_letter') => {
+    try {
+      const { error } = await supabase.rpc('mark_requirement_sent', {
+        inquiry_id: inquiry.id,
+        requirement_type: requirementType
+      });
+
+      if (error) throw error;
+      onRefresh();
+      alert(`${requirementType.toUpperCase()} marked as sent!`);
+    } catch (error) {
+      console.error('Error marking requirement as sent:', error);
+      alert('Failed to mark as sent. Please try again.');
     }
   };
 
@@ -1068,6 +1128,23 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
           }}
           initialData={{
             inquiry_id: selectedInquiry.id
+          }}
+        />
+      )}
+
+      {/* Lost Reason Modal */}
+      {inquiryToMarkLost && (
+        <LostReasonModal
+          isOpen={lostReasonModalOpen}
+          onClose={() => {
+            setLostReasonModalOpen(false);
+            setInquiryToMarkLost(null);
+          }}
+          inquiryId={inquiryToMarkLost.id}
+          inquiryNumber={inquiryToMarkLost.inquiry_number}
+          onSuccess={() => {
+            onRefresh();
+            setInquiryToMarkLost(null);
           }}
         />
       )}
