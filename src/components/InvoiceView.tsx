@@ -318,7 +318,7 @@ export function InvoiceView({ invoice, items, onClose }: InvoiceViewProps) {
                   <div className="pt-1">
                     <span className="font-bold">{language === 'id' ? 'Address:' : 'Address:'}</span>
                   </div>
-                  <div className="flex pt-1">
+                  <div className="flex">
                     <p>{customer?.address || ''}</p>
                     <p>{customer?.city || ''}</p>
                   </div>
