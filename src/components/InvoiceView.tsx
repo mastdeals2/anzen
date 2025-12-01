@@ -412,7 +412,7 @@ export function InvoiceView({ invoice, items, onClose }: InvoiceViewProps) {
               <div className="flex items-stretch">
                 {/* Left - Amount in Words */}
                 <div className="flex-1 p-2 border-r-2 border-black print:p-1.5">
-                  <p className="text-xs font-bold print:text-[10px]">{language === 'id' ? 'Note:' : 'Note:'}</p>
+                  <p className="text-xs font-bold print:text-[10px]">{language === 'id' ? 'Amount In words:' : 'Amount in words:'}</p>
                   <p className="text-xs mt-0.5 font-bold uppercase print:text-[10px] print:mt-0">
                     IDR {numberToWords(Math.round(invoice.total_amount))} RUPIAH
                   </p>
