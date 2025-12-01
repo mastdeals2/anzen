@@ -314,6 +314,7 @@ export function InvoiceView({ invoice, items, onClose }: InvoiceViewProps) {
                   <div>
                     <span className="font-bold">{language === 'id' ? 'Company Name:' : 'Company Name:'}</span>
                     <span className="font-semibold">{ customer?.company_name || ''}</span>                  </div>
+            
                   <div className="pt-1">
                     <span className="font-bold">{language === 'id' ? 'Address:' : 'Address:'}</span>
                   </div>
@@ -439,7 +440,7 @@ export function InvoiceView({ invoice, items, onClose }: InvoiceViewProps) {
             {invoice.notes && (
               <div className="mt-3 border-2 border-black p-2 print:mt-2 print:p-1.5">
                 <p className="text-xs print:text-[10px]">
-                  <span className="font-bold">{language === 'id' ? 'Notes: ' : 'Notes: '}</span>
+                  <span className="font-bold">{language === 'id' ? 'Notes hehe: ' : 'Notes hehe: '}</span>
                   <span>{invoice.notes}</span>
                 </p>
               </div>
