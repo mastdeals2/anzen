@@ -344,13 +344,13 @@ export function InvoiceView({ invoice, items, onClose }: InvoiceViewProps) {
                     <span className="font-bold">{language === 'id' ? 'Invoice Date:' : 'Invoice Date:'}</span>
                     <span className="ml-2">{formatDate(invoice.invoice_date)}</span>
                   </div>
-                  <div>
-                    <span className="font-bold">{language === 'id' ? 'Payment Terms:' : 'Payment Terms:'}</span>
-                    <span className="ml-2">{getPaymentTermsText()}</span>
-                  </div>
                   <div className="pt-1">
                     <span className="font-bold">Po No:</span>
                     <span className="ml-2">{invoice.po_number || 'N/A'}</span>
+                  </div>
+                   <div>
+                    <span className="font-bold">{language === 'id' ? 'Payment Terms:' : 'Payment Terms:'}</span>
+                    <span className="ml-2">{getPaymentTermsText()}</span>
                   </div>
                 </div>
               </div>
