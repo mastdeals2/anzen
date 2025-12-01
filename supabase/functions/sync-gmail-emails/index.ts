@@ -86,10 +86,11 @@ Deno.serve(async (req: Request) => {
     }
 
     const { data: connections, error: connectionsError } = await supabase
-      .from('crm_gmail_connections')
+      .from('gmail_connections')
       .select('*')
       .eq('user_id', user.id)
-      .eq('is_active', true);
+      .eq('is_connected', true)
+      .eq('sync_enabled', true);
 
     if (connectionsError) throw connectionsError;
     if (!connections || connections.length === 0) {
@@ -107,7 +108,7 @@ Deno.serve(async (req: Request) => {
 
     for (const connection of connections) {
       try {
-        const tokenExpiry = new Date(connection.token_expiry);
+        const tokenExpiry = new Date(connection.access_token_expires_at);
         let accessToken = connection.access_token;
 
         if (tokenExpiry <= new Date()) {
@@ -131,10 +132,10 @@ Deno.serve(async (req: Request) => {
           accessToken = refreshData.access_token;
 
           await supabase
-            .from('crm_gmail_connections')
+            .from('gmail_connections')
             .update({
               access_token: accessToken,
-              token_expiry: new Date(Date.now() + refreshData.expires_in * 1000).toISOString(),
+              access_token_expires_at: new Date(Date.now() + refreshData.expires_in * 1000).toISOString(),
             })
             .eq('id', connection.id);
         }
@@ -261,7 +262,7 @@ Deno.serve(async (req: Request) => {
         totalInquiries += validResults.filter(r => r.inquiry).length;
 
         await supabase
-          .from('crm_gmail_connections')
+          .from('gmail_connections')
           .update({ last_sync: new Date().toISOString() })
           .eq('id', connection.id);
 
