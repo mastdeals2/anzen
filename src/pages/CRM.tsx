@@ -3,7 +3,7 @@ import { Layout } from '../components/Layout';
 import { Modal } from '../components/Modal';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Plus, Mail, Calendar as CalendarIcon, LayoutGrid, Users, Table, Inbox, Activity, Clock } from 'lucide-react';
+import { Plus, Mail, Calendar as CalendarIcon, LayoutGrid, Users, Table, Inbox, Activity, Clock, Archive } from 'lucide-react';
 import { EmailInbox } from '../components/crm/EmailInbox';
 import { InquiryTableExcel } from '../components/crm/InquiryTableExcel';
 import { ReminderCalendar } from '../components/crm/ReminderCalendar';
@@ -12,6 +12,7 @@ import { EmailComposer } from '../components/crm/EmailComposer';
 import { CustomerDatabase } from '../components/crm/CustomerDatabase';
 import { ActivityLogger } from '../components/crm/ActivityLogger';
 import { AppointmentScheduler } from '../components/crm/AppointmentScheduler';
+import { ArchiveView } from '../components/crm/ArchiveView';
 
 interface Inquiry {
   id: string;
@@ -27,7 +28,9 @@ interface Inquiry {
   contact_email: string | null;
   contact_phone: string | null;
   email_subject: string | null;
+  mail_subject?: string | null;
   status: string;
+  pipeline_status?: string;
   priority: string;
   coa_sent: boolean;
   coa_sent_date: string | null;
@@ -37,6 +40,25 @@ interface Inquiry {
   sample_sent_date: string | null;
   price_quoted: boolean;
   price_quoted_date: string | null;
+  price_required?: boolean;
+  coa_required?: boolean;
+  sample_required?: boolean;
+  agency_letter_required?: boolean;
+  price_sent_at?: string | null;
+  coa_sent_at?: string | null;
+  sample_sent_at?: string | null;
+  agency_letter_sent_at?: string | null;
+  aceerp_no?: string | null;
+  purchase_price?: number | null;
+  purchase_price_currency?: string;
+  offered_price?: number | null;
+  offered_price_currency?: string;
+  delivery_date?: string | null;
+  delivery_terms?: string | null;
+  lost_reason?: string | null;
+  lost_at?: string | null;
+  competitor_name?: string | null;
+  competitor_price?: number | null;
   remarks: string | null;
   internal_notes: string | null;
   created_at: string;
@@ -49,7 +71,7 @@ export function CRM() {
   const { profile } = useAuth();
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'table' | 'pipeline' | 'calendar' | 'email' | 'customers' | 'activities' | 'appointments'>('table');
+  const [activeTab, setActiveTab] = useState<'table' | 'pipeline' | 'calendar' | 'email' | 'customers' | 'activities' | 'appointments' | 'archive'>('table');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingInquiry, setEditingInquiry] = useState<Inquiry | null>(null);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
@@ -77,9 +99,11 @@ export function CRM() {
 
   const loadInquiries = async () => {
     try {
+      // Exclude 'lost' status inquiries from default view (they appear in Archive)
       const { data, error } = await supabase
         .from('crm_inquiries')
         .select('*, user_profiles!crm_inquiries_assigned_to_fkey(full_name)')
+        .neq('pipeline_status', 'lost')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -316,6 +340,17 @@ export function CRM() {
                 <Clock className="w-5 h-5" />
                 Appointments
               </button>
+              <button
+                onClick={() => setActiveTab('archive')}
+                className={`flex items-center gap-2 px-6 py-4 border-b-2 transition whitespace-nowrap ${
+                  activeTab === 'archive'
+                    ? 'border-blue-500 text-blue-600 font-medium'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Archive className="w-5 h-5" />
+                Archive
+              </button>
             </div>
           </div>
 
@@ -353,6 +388,10 @@ export function CRM() {
 
             {activeTab === 'appointments' && (
               <AppointmentScheduler onAppointmentCreated={loadInquiries} />
+            )}
+
+            {activeTab === 'archive' && (
+              <ArchiveView canManage={canManage} onRefresh={loadInquiries} />
             )}
           </div>
         </div>
