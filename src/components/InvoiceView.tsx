@@ -345,7 +345,7 @@ export function InvoiceView({ invoice, items, onClose }: InvoiceViewProps) {
                     <span className="ml-2">{formatDate(invoice.invoice_date)}</span>
                   </div>
                   <div>
-                    <span className="font-bold">{language === 'id' ? 'Due Date:' : 'Due Date:'}</span>
+                    <span className="font-bold">{language === 'id' ? 'Payment Terms:' : 'Payment Terms:'}</span>
                     <span className="ml-2">{getPaymentTermsText()}</span>
                   </div>
                   <div className="pt-1">
