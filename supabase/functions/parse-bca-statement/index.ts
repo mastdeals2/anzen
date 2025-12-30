@@ -26,16 +26,23 @@ Deno.serve(async (req: Request) => {
       throw new Error('No authorization header');
     }
 
-    const supabase = createClient(
+    // User client for auth verification
+    const supabaseUser = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
       { global: { headers: { Authorization: authHeader } } }
     );
 
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    const { data: { user }, error: userError } = await supabaseUser.auth.getUser();
     if (userError || !user) {
       throw new Error('Unauthorized');
     }
+
+    // Service role client for database operations (bypasses RLS)
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
 
     const formData = await req.formData();
     const file = formData.get('file') as File;
@@ -76,7 +83,7 @@ Deno.serve(async (req: Request) => {
 
     if (uploadError) {
       console.error('Storage upload error:', uploadError);
-      throw new Error('Failed to upload PDF');
+      throw new Error('Failed to upload PDF: ' + uploadError.message);
     }
 
     const { data: { publicUrl } } = supabase.storage
@@ -105,7 +112,7 @@ Deno.serve(async (req: Request) => {
 
     if (uploadInsertError) {
       console.error('Upload insert error:', uploadInsertError);
-      throw new Error('Failed to create upload record');
+      throw new Error('Failed to create upload record: ' + uploadInsertError.message);
     }
 
     const lines = parsed.transactions.map((txn) => ({
@@ -123,13 +130,15 @@ Deno.serve(async (req: Request) => {
       created_by: user.id,
     }));
 
+    console.log('Inserting', lines.length, 'transactions');
+
     const { error: linesError } = await supabase
       .from('bank_statement_lines')
       .insert(lines);
 
     if (linesError) {
       console.error('Lines insert error:', linesError);
-      throw new Error('Failed to insert transactions');
+      throw new Error('Failed to insert transactions: ' + linesError.message);
     }
 
     return new Response(
