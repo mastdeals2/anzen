@@ -23,7 +23,6 @@ interface StatementLine {
   currency: string;
   status: 'matched' | 'suggested' | 'unmatched' | 'recorded';
   matchedEntry?: string;
-  matchedExpenseInfo?: string;
 }
 
 interface BankReconciliationEnhancedProps {
@@ -126,15 +125,7 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
     try {
       const { data, error } = await supabase
         .from('bank_statement_lines')
-        .select(`
-          *,
-          matched_expense:expenses!bank_statement_lines_matched_expense_id_fkey(
-            id,
-            description,
-            vendor_name,
-            category
-          )
-        `)
+        .select('*')
         .eq('bank_account_id', selectedBank)
         .gte('transaction_date', dateRange.start)
         .lte('transaction_date', dateRange.end)
@@ -153,7 +144,6 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
         currency: row.currency || 'IDR',
         status: row.reconciliation_status || 'unmatched',
         matchedEntry: row.matched_entry_id,
-        matchedExpenseInfo: row.matched_expense ? `${row.matched_expense.vendor_name || row.matched_expense.description}` : undefined,
       }));
       setStatementLines(lines);
     } catch (err) {
@@ -710,11 +700,6 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
                     <div className="truncate">{line.description}</div>
                     {line.reference && (
                       <div className="text-xs text-gray-500 font-mono">{line.reference}</div>
-                    )}
-                    {line.matchedExpenseInfo && (
-                      <div className="text-xs text-blue-600 font-medium mt-1">
-                        Linked: {line.matchedExpenseInfo}
-                      </div>
                     )}
                   </td>
                   <td className="px-3 py-2 text-right text-red-600 font-medium whitespace-nowrap">
