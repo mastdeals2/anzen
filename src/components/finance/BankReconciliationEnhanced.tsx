@@ -683,7 +683,7 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
       if (descCol >= 0) {
         const type = String(row[descCol] || '').trim();
         const details = String(row[descCol + 1] || '').trim();
-        description = [type, details].filter(p => p).join(' - ').replace(/\s+/g, ' ');
+        description = type + (details ? '; ' + details : '');
       }
       const branch = branchCol >= 0 ? String(row[branchCol] || '').trim() : '';
 
@@ -1193,9 +1193,9 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
                     {new Date(line.date).toLocaleDateString('id-ID')}
                   </td>
                   <td className="px-3 py-2 text-gray-700 max-w-md">
-                    <div className="truncate">{line.description}</div>
+                    <div className="whitespace-pre-wrap text-sm leading-tight">{line.description}</div>
                     {line.reference && (
-                      <div className="text-xs text-gray-500 font-mono">{line.reference}</div>
+                      <div className="text-xs text-gray-500 font-mono mt-1">{line.reference}</div>
                     )}
                   </td>
                   <td className="px-3 py-2 text-right text-red-600 font-medium whitespace-nowrap">
