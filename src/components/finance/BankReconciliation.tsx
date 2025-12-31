@@ -267,19 +267,19 @@ export function BankReconciliation({ canManage }: BankReconciliationProps) {
         supabase
           .from('receipt_vouchers')
           .select('id, voucher_number, voucher_date, amount, description, customers(company_name)')
-          .eq('bank_account_id', selectedBank)
+          .or(`bank_account_id.eq.${selectedBank},bank_account_id.is.null`)
           .gte('voucher_date', dateStart.toISOString().split('T')[0])
           .lte('voucher_date', dateEnd.toISOString().split('T')[0]),
         supabase
           .from('payment_vouchers')
           .select('id, voucher_number, voucher_date, amount, description, suppliers(company_name)')
-          .eq('bank_account_id', selectedBank)
+          .or(`bank_account_id.eq.${selectedBank},bank_account_id.is.null`)
           .gte('voucher_date', dateStart.toISOString().split('T')[0])
           .lte('voucher_date', dateEnd.toISOString().split('T')[0]),
         supabase
           .from('finance_expenses')
           .select('id, voucher_number, expense_date, amount, description, expense_category')
-          .eq('bank_account_id', selectedBank)
+          .or(`bank_account_id.eq.${selectedBank},bank_account_id.is.null`)
           .gte('expense_date', dateStart.toISOString().split('T')[0])
           .lte('expense_date', dateEnd.toISOString().split('T')[0])
       ]);
