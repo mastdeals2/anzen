@@ -279,7 +279,10 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
 
           console.log('📊 Raw Excel data rows:', jsonData.length);
-          console.log('📋 First 10 rows:', jsonData.slice(0, 10));
+          console.log('📋 First 10 rows:');
+          jsonData.slice(0, 10).forEach((row, i) => {
+            console.log(`Row ${i}:`, row);
+          });
 
           const { lines, metadata } = parseStatementDataWithMetadata(jsonData);
 
@@ -398,9 +401,13 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
       const row = rows[i];
       if (!row || row.length === 0) continue;
 
-      const firstCell = String(row[0] || '').toLowerCase();
-      if (firstCell.includes('tanggal') && firstCell.includes('transaksi')) {
+      const rowStr = row.map((c: any) => String(c || '').toLowerCase()).join('|');
+
+      if ((rowStr.includes('tanggal') || rowStr.includes('date') || rowStr.includes('tgl')) &&
+          (rowStr.includes('keterangan') || rowStr.includes('description') || rowStr.includes('desc') ||
+           rowStr.includes('mutasi') || rowStr.includes('amount') || rowStr.includes('saldo') || rowStr.includes('balance'))) {
         headerRowIdx = i;
+        console.log(`✅ Found header at row ${i}:`, row);
         break;
       }
     }
@@ -408,27 +415,33 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
     console.log('🔍 Header row index:', headerRowIdx);
 
     if (headerRowIdx === -1) {
-      console.error('❌ Could not find BCA column headers (looking for "Tanggal Transaksi")');
-      console.log('📋 Checked rows:', rows.slice(0, 20).map((r, i) => `Row ${i}: ${r[0]}`));
+      console.error('❌ Could not find column headers');
+      console.log('📋 All rows checked:');
+      rows.slice(0, 20).forEach((r, i) => {
+        console.log(`  Row ${i}:`, r);
+      });
       return { lines, metadata };
     }
 
     const headerRow = rows[headerRowIdx];
     let dateCol = -1, descCol = -1, branchCol = -1, amountCol = -1, balanceCol = -1;
+    let debitCol = -1, creditCol = -1;
 
     headerRow.forEach((cell: any, idx: number) => {
       const cellStr = String(cell || '').toLowerCase();
-      if (cellStr.includes('tanggal')) dateCol = idx;
-      if (cellStr.includes('keterangan')) descCol = idx;
-      if (cellStr.includes('cabang')) branchCol = idx;
-      if (cellStr.includes('jumlah')) amountCol = idx;
-      if (cellStr.includes('saldo')) balanceCol = idx;
+      if (cellStr.includes('tanggal') || cellStr.includes('date') || cellStr.includes('tgl')) dateCol = idx;
+      if (cellStr.includes('keterangan') || cellStr.includes('description') || cellStr.includes('desc')) descCol = idx;
+      if (cellStr.includes('cabang') || cellStr.includes('branch')) branchCol = idx;
+      if (cellStr.includes('mutasi') && !cellStr.includes('debet') && !cellStr.includes('kredit')) amountCol = idx;
+      if (cellStr.includes('debet') || cellStr.includes('debit') || cellStr.includes('db')) debitCol = idx;
+      if (cellStr.includes('kredit') || cellStr.includes('credit') || cellStr.includes('cr')) creditCol = idx;
+      if (cellStr.includes('saldo') || cellStr.includes('balance')) balanceCol = idx;
     });
 
-    console.log('📍 Column positions:', { dateCol, descCol, branchCol, amountCol, balanceCol });
+    console.log('📍 Column positions:', { dateCol, descCol, branchCol, amountCol, debitCol, creditCol, balanceCol });
 
-    if (dateCol === -1 || descCol === -1 || amountCol === -1) {
-      console.error('❌ Missing required columns', { dateCol, descCol, amountCol });
+    if (dateCol === -1) {
+      console.error('❌ Missing date column');
       console.log('📋 Header row:', headerRow);
       return { lines, metadata };
     }
@@ -491,27 +504,39 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
         processedCount++;
       }
 
-      const amountStr = String(row[amountCol] || '').trim();
-      const isCR = amountStr.includes(' CR');
-      const isDB = amountStr.includes(' DB');
-
-      const amountCleaned = amountStr.replace(/[^\d,\.]/g, '');
-      const amount = parseFloat(amountCleaned.replace(/,/g, '')) || 0;
-
       let debit = 0, credit = 0;
-      if (isCR) {
-        credit = amount;
-      } else if (isDB) {
-        debit = amount;
-      } else {
-        debit = amount;
+
+      if (debitCol >= 0 && creditCol >= 0) {
+        const debitStr = String(row[debitCol] || '').trim();
+        const creditStr = String(row[creditCol] || '').trim();
+        const debitCleaned = debitStr.replace(/[^\d,\.]/g, '');
+        const creditCleaned = creditStr.replace(/[^\d,\.]/g, '');
+        debit = parseFloat(debitCleaned.replace(/,/g, '')) || 0;
+        credit = parseFloat(creditCleaned.replace(/,/g, '')) || 0;
+      } else if (amountCol >= 0) {
+        const amountStr = String(row[amountCol] || '').trim();
+        const isCR = amountStr.includes(' CR');
+        const isDB = amountStr.includes(' DB');
+        const amountCleaned = amountStr.replace(/[^\d,\.]/g, '');
+        const amount = parseFloat(amountCleaned.replace(/,/g, '')) || 0;
+
+        if (isCR) {
+          credit = amount;
+        } else if (isDB) {
+          debit = amount;
+        } else {
+          debit = amount;
+        }
       }
 
-      const balanceStr = String(row[balanceCol] || '').trim();
-      const balanceCleaned = balanceStr.replace(/[^\d,\.]/g, '');
-      const balance = parseFloat(balanceCleaned.replace(/,/g, '')) || 0;
+      let balance = 0;
+      if (balanceCol >= 0) {
+        const balanceStr = String(row[balanceCol] || '').trim();
+        const balanceCleaned = balanceStr.replace(/[^\d,\.]/g, '');
+        balance = parseFloat(balanceCleaned.replace(/,/g, '')) || 0;
+      }
 
-      const description = String(row[descCol] || '').trim();
+      const description = descCol >= 0 ? String(row[descCol] || '').trim() : '';
       const branch = branchCol >= 0 ? String(row[branchCol] || '').trim() : '';
 
       lines.push({
