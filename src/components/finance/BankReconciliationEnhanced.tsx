@@ -203,7 +203,49 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
             return;
           }
 
-          await saveStatementsToDatabase(parsedLines, metadata);
+          const { data: uploadRecord, error: uploadError } = await supabase
+            .from('bank_statement_uploads')
+            .insert({
+              bank_account_id: selectedBank,
+              statement_period: metadata.period || `${new Date().toLocaleString('default', { month: 'long' })} ${new Date().getFullYear()}`,
+              statement_start_date: metadata.startDate || dateRange.start,
+              statement_end_date: metadata.endDate || dateRange.end,
+              currency: selectedAccount?.currency || 'IDR',
+              opening_balance: metadata.openingBalance || 0,
+              closing_balance: metadata.closingBalance || parsedLines[parsedLines.length - 1]?.balance || 0,
+              total_debits: metadata.totalDebits || parsedLines.reduce((sum, l) => sum + l.debit, 0),
+              total_credits: metadata.totalCredits || parsedLines.reduce((sum, l) => sum + l.credit, 0),
+              transaction_count: parsedLines.length,
+              status: 'completed',
+            })
+            .select()
+            .single();
+
+          if (uploadError) throw uploadError;
+
+          const { data: { user } } = await supabase.auth.getUser();
+
+          const insertData = parsedLines.map(line => ({
+            upload_id: uploadRecord.id,
+            bank_account_id: selectedBank,
+            transaction_date: line.date,
+            description: line.description,
+            reference: line.reference,
+            debit_amount: line.debit,
+            credit_amount: line.credit,
+            running_balance: line.balance,
+            currency: selectedAccount?.currency || 'IDR',
+            reconciliation_status: 'unmatched',
+            created_by: user?.id,
+          }));
+
+          const { error } = await supabase
+            .from('bank_statement_lines')
+            .insert(insertData);
+
+          if (error) throw error;
+
+          await autoMatchTransactions();
           await loadStatementLines();
           alert(`✅ Successfully imported ${parsedLines.length} transactions`);
         } catch (err: any) {
