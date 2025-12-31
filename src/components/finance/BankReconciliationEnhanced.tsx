@@ -154,6 +154,70 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
     }
   };
 
+  const parseIndonesianNumber = (str: string): number => {
+    if (!str) return 0;
+    const cleaned = str.replace(/[^\d,\.]/g, '');
+    if (cleaned.includes(',') && cleaned.includes('.')) {
+      const lastComma = cleaned.lastIndexOf(',');
+      const lastDot = cleaned.lastIndexOf('.');
+      if (lastComma > lastDot) {
+        return parseFloat(cleaned.replace(/\./g, '').replace(/,/g, '.')) || 0;
+      } else {
+        return parseFloat(cleaned.replace(/,/g, '')) || 0;
+      }
+    } else if (cleaned.includes(',')) {
+      return parseFloat(cleaned.replace(/,/g, '.')) || 0;
+    } else {
+      return parseFloat(cleaned.replace(/,/g, '')) || 0;
+    }
+  };
+
+  const handleCSVUpload = async (file: File) => {
+    try {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const text = event.target?.result as string;
+          const lines = text.split('\n');
+          const rows: any[][] = [];
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const cells = line.split(';').map(c => c.trim());
+            rows.push(cells);
+          }
+
+          console.log('📊 CSV rows parsed:', rows.length);
+          console.log('📋 First 10 rows:');
+          rows.slice(0, 10).forEach((row, i) => {
+            console.log(`Row ${i}:`, row);
+          });
+
+          const { lines: parsedLines, metadata } = parseStatementDataWithMetadata(rows);
+
+          console.log('✅ Parsed lines:', parsedLines.length);
+          console.log('📈 Metadata:', metadata);
+
+          if (parsedLines.length === 0) {
+            alert('❌ No transactions found in the CSV file');
+            return;
+          }
+
+          await saveStatementsToDatabase(parsedLines, metadata);
+          await loadStatementLines();
+          alert(`✅ Successfully imported ${parsedLines.length} transactions`);
+        } catch (err: any) {
+          console.error('CSV parsing error:', err);
+          alert(`❌ Error parsing CSV: ${err.message}`);
+        }
+      };
+      reader.readAsText(file);
+    } catch (error: any) {
+      console.error('CSV upload error:', error);
+      alert(`❌ Failed to read CSV: ${error.message}`);
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedBank || !selectedAccount) return;
@@ -162,11 +226,14 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
     try {
       const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
       const isImage = file.type.startsWith('image/') || file.name.match(/\.(png|jpg|jpeg)$/i);
+      const isCSV = file.name.toLowerCase().endsWith('.csv');
 
       if (isPDF) {
         await handlePDFUpload(file);
       } else if (isImage) {
         await handlePDFUpload(file, true);
+      } else if (isCSV) {
+        await handleCSVUpload(file);
       } else {
         await handleExcelUpload(file);
       }
@@ -509,22 +576,18 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
       if (debitCol >= 0 && creditCol >= 0) {
         const debitStr = String(row[debitCol] || '').trim();
         const creditStr = String(row[creditCol] || '').trim();
-        const debitCleaned = debitStr.replace(/[^\d,\.]/g, '');
-        const creditCleaned = creditStr.replace(/[^\d,\.]/g, '');
-        debit = parseFloat(debitCleaned.replace(/,/g, '')) || 0;
-        credit = parseFloat(creditCleaned.replace(/,/g, '')) || 0;
+        debit = parseIndonesianNumber(debitStr);
+        credit = parseIndonesianNumber(creditStr);
       } else if (amountCol >= 0) {
         const amountStr = String(row[amountCol] || '').trim();
-        const isCR = amountStr.includes(' CR');
-        const isDB = amountStr.includes(' DB');
-        const amountCleaned = amountStr.replace(/[^\d,\.]/g, '');
-        const amount = parseFloat(amountCleaned.replace(/,/g, '')) || 0;
+        const dbCrIndicator = row[amountCol + 1] ? String(row[amountCol + 1]).trim().toUpperCase() : '';
+        const isCR = dbCrIndicator === 'CR' || amountStr.includes(' CR');
+        const isDB = dbCrIndicator === 'DB' || amountStr.includes(' DB');
+        const amount = parseIndonesianNumber(amountStr);
 
         if (isCR) {
           credit = amount;
-        } else if (isDB) {
-          debit = amount;
-        } else {
+        } else if (isDB || amount > 0) {
           debit = amount;
         }
       }
@@ -532,11 +595,18 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
       let balance = 0;
       if (balanceCol >= 0) {
         const balanceStr = String(row[balanceCol] || '').trim();
-        const balanceCleaned = balanceStr.replace(/[^\d,\.]/g, '');
-        balance = parseFloat(balanceCleaned.replace(/,/g, '')) || 0;
+        balance = parseIndonesianNumber(balanceStr);
       }
 
-      const description = descCol >= 0 ? String(row[descCol] || '').trim() : '';
+      let description = '';
+      if (descCol >= 0) {
+        const descParts = [
+          String(row[descCol] || '').trim(),
+          String(row[descCol + 1] || '').trim(),
+          String(row[descCol + 2] || '').trim()
+        ].filter(p => p && !p.match(/^(DB|CR)$/i) && !p.match(/^[\d,\.]+$/));
+        description = descParts.join(' ').trim();
+      }
       const branch = branchCol >= 0 ? String(row[branchCol] || '').trim() : '';
 
       lines.push({
@@ -560,35 +630,43 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
 
       const firstCell = String(row[0] || '');
 
-      if (firstCell.includes('Saldo Awal')) {
-        const valueCell = String(row[1] || row[0] || '');
-        const amountMatch = valueCell.match(/[\d,\.]+/);
-        if (amountMatch) {
-          metadata.openingBalance = parseFloat(amountMatch[0].replace(/,/g, '')) || 0;
+      if (firstCell.includes('Saldo Awal') || firstCell.includes('SALDO AWAL')) {
+        for (let j = 0; j < row.length; j++) {
+          const cell = String(row[j] || '');
+          if (cell && /[\d,\.]+/.test(cell)) {
+            metadata.openingBalance = parseIndonesianNumber(cell);
+            break;
+          }
         }
       }
 
-      if (firstCell.includes('Mutasi Debet')) {
-        const valueCell = String(row[1] || row[0] || '');
-        const amountMatch = valueCell.match(/[\d,\.]+/);
-        if (amountMatch) {
-          metadata.totalDebits = parseFloat(amountMatch[0].replace(/,/g, '')) || 0;
+      if (firstCell.includes('Mutasi Debet') || firstCell.includes('MUTASI DB') || firstCell.includes('Mutasi DB')) {
+        for (let j = 0; j < row.length; j++) {
+          const cell = String(row[j] || '');
+          if (cell && /[\d,\.]+/.test(cell)) {
+            metadata.totalDebits = parseIndonesianNumber(cell);
+            break;
+          }
         }
       }
 
-      if (firstCell.includes('Mutasi Kredit')) {
-        const valueCell = String(row[1] || row[0] || '');
-        const amountMatch = valueCell.match(/[\d,\.]+/);
-        if (amountMatch) {
-          metadata.totalCredits = parseFloat(amountMatch[0].replace(/,/g, '')) || 0;
+      if (firstCell.includes('Mutasi Kredit') || firstCell.includes('MUTASI CR') || firstCell.includes('Mutasi CR')) {
+        for (let j = 0; j < row.length; j++) {
+          const cell = String(row[j] || '');
+          if (cell && /[\d,\.]+/.test(cell)) {
+            metadata.totalCredits = parseIndonesianNumber(cell);
+            break;
+          }
         }
       }
 
-      if (firstCell.includes('Saldo Akhir')) {
-        const valueCell = String(row[1] || row[0] || '');
-        const amountMatch = valueCell.match(/[\d,\.]+/);
-        if (amountMatch) {
-          metadata.closingBalance = parseFloat(amountMatch[0].replace(/,/g, '')) || 0;
+      if (firstCell.includes('Saldo Akhir') || firstCell.includes('SALDO AKHIR')) {
+        for (let j = 0; j < row.length; j++) {
+          const cell = String(row[j] || '');
+          if (cell && /[\d,\.]+/.test(cell)) {
+            metadata.closingBalance = parseIndonesianNumber(cell);
+            break;
+          }
         }
       }
     }
