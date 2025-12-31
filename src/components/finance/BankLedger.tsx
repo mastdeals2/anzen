@@ -27,8 +27,10 @@ interface BankLedgerProps {
 export default function BankLedger({ selectedBank: propSelectedBank }: BankLedgerProps) {
   const [banks, setBanks] = useState<BankAccount[]>([]);
   const [selectedBank, setSelectedBank] = useState<string>('');
-  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [selectedEntry, setSelectedEntry] = useState<any | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
   const [dateRange, setDateRange] = useState({
     start: new Date(new Date().getFullYear(), 3, 1).toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0],
@@ -70,11 +72,35 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
 
       const entries: any[] = [];
 
+      // Get bank statement lines FIRST (actual bank transactions)
+      const { data: bankLines } = await supabase
+        .from('bank_statement_lines')
+        .select('id, transaction_date, description, reference, debit_amount, credit_amount, matched_expense_id, matched_receipt_id, matched_entry_id, notes')
+        .eq('bank_account_id', selectedBank)
+        .gte('transaction_date', dateRange.start)
+        .lte('transaction_date', dateRange.end)
+        .order('transaction_date');
+
+      if (bankLines) {
+        bankLines.forEach(line => {
+          entries.push({
+            id: line.id,
+            entry_date: line.transaction_date,
+            particulars: line.description || 'Bank Transaction',
+            reference: line.reference || '-',
+            debit: Number(line.debit_amount || 0),
+            credit: Number(line.credit_amount || 0),
+            type: 'bank',
+            linkedId: line.matched_expense_id || line.matched_receipt_id || line.matched_entry_id,
+            notes: line.notes
+          });
+        });
+      }
+
       // Get receipt vouchers (customer payments - increases bank balance)
       const { data: receipts } = await supabase
         .from('receipt_vouchers')
         .select('id, voucher_date, voucher_number, amount, description, customers(company_name)')
-        .eq('bank_account_id', selectedBank)
         .gte('voucher_date', dateRange.start)
         .lte('voucher_date', dateRange.end)
         .order('voucher_date');
@@ -88,6 +114,9 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
             reference: r.voucher_number,
             debit: 0,
             credit: r.amount,
+            type: 'receipt',
+            description: r.description,
+            customerName: (r.customers as any)?.company_name
           });
         });
       }
@@ -96,7 +125,6 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
       const { data: payments } = await supabase
         .from('payment_vouchers')
         .select('id, voucher_date, voucher_number, amount, description, suppliers(company_name)')
-        .eq('bank_account_id', selectedBank)
         .gte('voucher_date', dateRange.start)
         .lte('voucher_date', dateRange.end)
         .order('voucher_date');
@@ -110,6 +138,9 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
             reference: p.voucher_number,
             debit: p.amount,
             credit: 0,
+            type: 'payment',
+            description: p.description,
+            supplierName: (p.suppliers as any)?.company_name
           });
         });
       }
@@ -117,8 +148,7 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
       // Get expenses paid via bank
       const { data: expenses } = await supabase
         .from('finance_expenses')
-        .select('id, expense_date, voucher_number, amount, description, expense_category')
-        .eq('bank_account_id', selectedBank)
+        .select('id, expense_date, voucher_number, amount, description, expense_category, context_type, context_id')
         .gte('expense_date', dateRange.start)
         .lte('expense_date', dateRange.end)
         .order('expense_date');
@@ -132,6 +162,11 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
             reference: e.voucher_number || '-',
             debit: e.amount,
             credit: 0,
+            type: 'expense',
+            description: e.description,
+            expenseCategory: e.expense_category,
+            contextType: e.context_type,
+            contextId: e.context_id
           });
         });
       }
@@ -380,7 +415,14 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
                   </tr>
                 ) : (
                   ledgerEntries.map(entry => (
-                    <tr key={entry.id} className="hover:bg-gray-50">
+                    <tr
+                      key={entry.id}
+                      className="hover:bg-blue-50 cursor-pointer transition-colors"
+                      onClick={() => {
+                        setSelectedEntry(entry);
+                        setShowDetailModal(true);
+                      }}
+                    >
                       <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                         {new Date(entry.entry_date).toLocaleDateString('id-ID')}
                       </td>
@@ -421,6 +463,107 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {showDetailModal && selectedEntry && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowDetailModal(false)}>
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Transaction Details</h3>
+              <button
+                onClick={() => setShowDetailModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <span className="text-2xl">&times;</span>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-gray-600">Date</p>
+                  <p className="font-medium">{new Date(selectedEntry.entry_date).toLocaleDateString('id-ID')}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Reference</p>
+                  <p className="font-medium font-mono">{selectedEntry.reference}</p>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm text-gray-600">Particulars</p>
+                <p className="font-medium">{selectedEntry.particulars}</p>
+              </div>
+
+              {selectedEntry.description && (
+                <div>
+                  <p className="text-sm text-gray-600">Description</p>
+                  <p className="font-medium">{selectedEntry.description}</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-gray-600">Debit</p>
+                  <p className="font-medium text-red-600">
+                    {selectedBankData && (selectedEntry.debit > 0 ? formatAmount(selectedEntry.debit, selectedBankData.currency) : '-')}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Credit</p>
+                  <p className="font-medium text-green-600">
+                    {selectedBankData && (selectedEntry.credit > 0 ? formatAmount(selectedEntry.credit, selectedBankData.currency) : '-')}
+                  </p>
+                </div>
+              </div>
+
+              {selectedEntry.type === 'expense' && (
+                <div>
+                  <p className="text-sm text-gray-600">Expense Category</p>
+                  <p className="font-medium capitalize">{selectedEntry.expenseCategory?.replace('_', ' ')}</p>
+                </div>
+              )}
+
+              {selectedEntry.type === 'receipt' && selectedEntry.customerName && (
+                <div>
+                  <p className="text-sm text-gray-600">Customer</p>
+                  <p className="font-medium">{selectedEntry.customerName}</p>
+                </div>
+              )}
+
+              {selectedEntry.type === 'payment' && selectedEntry.supplierName && (
+                <div>
+                  <p className="text-sm text-gray-600">Supplier</p>
+                  <p className="font-medium">{selectedEntry.supplierName}</p>
+                </div>
+              )}
+
+              {selectedEntry.type === 'bank' && selectedEntry.notes && (
+                <div>
+                  <p className="text-sm text-gray-600">Notes</p>
+                  <p className="font-medium">{selectedEntry.notes}</p>
+                </div>
+              )}
+
+              {selectedEntry.type === 'bank' && selectedEntry.linkedId && (
+                <div className="bg-blue-50 p-3 rounded-lg">
+                  <p className="text-sm text-blue-900 font-medium">
+                    This transaction is matched to a system entry
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setShowDetailModal(false)}
+                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
