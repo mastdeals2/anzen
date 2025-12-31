@@ -72,7 +72,7 @@ export function Stock() {
             .from('stock_reservations')
             .select('reserved_quantity')
             .eq('product_id', product.product_id)
-            .eq('is_released', false);
+            .eq('status', 'active');
 
           const reserved_quantity = reservedData?.reduce((sum, r) => sum + Number(r.reserved_quantity), 0) || 0;
           const shortage_quantity = shortageMap.get(product.product_id) || 0;

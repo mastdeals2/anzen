@@ -25,10 +25,17 @@ interface Batch {
   other_charges: number;
   expiry_date: string;
   is_active: boolean;
+  import_cost_allocated: number | null;
+  final_landed_cost: number | null;
+  import_container_id: string | null;
+  cost_locked: boolean | null;
   products?: {
     product_name: string;
     product_code: string;
     unit: string;
+  };
+  import_containers?: {
+    container_ref: string;
   };
   document_count?: number;
 }
@@ -40,6 +47,11 @@ interface Product {
   unit: string;
 }
 
+interface ImportContainer {
+  id: string;
+  container_ref: string;
+  status: string;
+}
 
 interface BatchDocument {
   id: string;
@@ -55,6 +67,7 @@ export function Batches() {
   const { profile } = useAuth();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [importContainers, setImportContainers] = useState<ImportContainer[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [documentsModalOpen, setDocumentsModalOpen] = useState(false);
@@ -65,6 +78,7 @@ export function Batches() {
   const [formData, setFormData] = useState({
     batch_number: '',
     product_id: '',
+    import_container_id: '',
     import_date: '',
     import_quantity: 0,
     packaging_details: '',
@@ -84,6 +98,7 @@ export function Batches() {
   useEffect(() => {
     loadBatches();
     loadProducts();
+    loadImportContainers();
   }, []);
 
   const loadBatches = async () => {
@@ -92,7 +107,8 @@ export function Batches() {
         .from('batches')
         .select(`
           *,
-          products(product_name, product_code, unit)
+          products(product_name, product_code, unit),
+          import_containers(container_ref)
         `)
         .order('import_date', { ascending: false });
 
@@ -129,6 +145,20 @@ export function Batches() {
       setProducts(data || []);
     } catch (error) {
       console.error('Error loading products:', error);
+    }
+  };
+
+  const loadImportContainers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('import_containers')
+        .select('id, container_ref, status')
+        .order('container_ref', { ascending: false });
+
+      if (error) throw error;
+      setImportContainers(data || []);
+    } catch (error) {
+      console.error('Error loading import containers:', error);
     }
   };
 
@@ -193,17 +223,13 @@ export function Batches() {
       const freightAmount = calculateCharge(formData.freight_charges, formData.freight_charge_type, importPriceIDR);
       const otherAmount = calculateCharge(formData.other_charges, formData.other_charge_type, importPriceIDR);
 
-      // Calculate correct current stock
-      // For new batches: current_stock = import_quantity (nothing sold yet)
-      // For existing batches: current_stock = import_quantity - actual_sold_quantity
-      const finalCurrentStock = formData.import_quantity - soldQuantity;
-
       const batchData = {
         batch_number: formData.batch_number,
         product_id: formData.product_id,
+        import_container_id: formData.import_container_id || null,
         import_date: formData.import_date,
         import_quantity: formData.import_quantity,
-        current_stock: finalCurrentStock,
+        current_stock: formData.import_quantity,
         packaging_details: formData.packaging_details,
         import_price: importPriceIDR,
         import_price_usd: formData.import_price_usd || null,
@@ -227,6 +253,21 @@ export function Batches() {
 
         if (error) throw error;
         batchId = editingBatch.id;
+
+        if (formData.import_quantity !== editingBatch.import_quantity) {
+          const { error: transError } = await supabase
+            .from('inventory_transactions')
+            .update({
+              quantity: formData.import_quantity,
+              notes: `Updated import quantity from ${editingBatch.import_quantity} to ${formData.import_quantity}`
+            })
+            .eq('batch_id', editingBatch.id)
+            .eq('transaction_type', 'purchase');
+
+          if (transError) {
+            console.error('Error updating purchase transaction:', transError);
+          }
+        }
       } else {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error('Not authenticated');
@@ -288,21 +329,7 @@ export function Batches() {
   };
 
   const handleEdit = async (batch: Batch) => {
-    // Calculate actual sold quantity from sales records
-    const { data: salesData } = await supabase
-      .from('sales_invoice_items')
-      .select('quantity')
-      .eq('batch_id', batch.id);
-
-    const actualSoldQuantity = salesData?.reduce((sum, item) => sum + parseFloat(item.quantity || 0), 0) || 0;
-
-    // Update the batch object with correct current_stock based on actual sales
-    const correctedBatch = {
-      ...batch,
-      current_stock: batch.import_quantity - actualSoldQuantity
-    };
-
-    setEditingBatch(correctedBatch);
+    setEditingBatch(batch);
 
     // Parse packaging details to extract per_pack_weight and pack_type
     let perPackWeight = '';
@@ -318,6 +345,7 @@ export function Batches() {
     setFormData({
       batch_number: batch.batch_number,
       product_id: batch.product_id,
+      import_container_id: batch.import_container_id || '',
       import_date: batch.import_date,
       import_quantity: batch.import_quantity,
       packaging_details: batch.packaging_details,
@@ -412,6 +440,7 @@ export function Batches() {
     setFormData({
       batch_number: '',
       product_id: '',
+      import_container_id: '',
       import_date: '',
       import_quantity: 0,
       packaging_details: '',
@@ -481,7 +510,9 @@ export function Batches() {
       render: (batch: Batch) => (
         <div>
           <div className="font-medium">{batch.products?.product_name}</div>
-          <div className="text-xs text-gray-500">{batch.products?.product_code}</div>
+          {batch.products?.product_code && (
+            <div className="text-xs text-gray-500">{batch.products.product_code}</div>
+          )}
         </div>
       )
     },
@@ -538,6 +569,37 @@ export function Batches() {
             </>
           ) : (
             <div className="text-gray-500">{formatCurrency(batch.import_price)}</div>
+          )}
+        </div>
+      )
+    },
+    {
+      key: 'landed_cost',
+      label: 'Landed Cost',
+      render: (batch: Batch) => (
+        <div className="text-sm">
+          {batch.import_cost_allocated && batch.import_cost_allocated > 0 ? (
+            <>
+              <div className="font-medium text-blue-700">
+                {formatCurrency(batch.final_landed_cost || 0)}
+              </div>
+              <div className="text-xs text-gray-500">
+                Base: {formatCurrency(batch.import_price)}
+              </div>
+              <div className="text-xs text-green-600">
+                +Import: {formatCurrency(batch.import_cost_allocated)}
+              </div>
+              {batch.import_containers?.container_ref && (
+                <div className="text-xs text-gray-400">
+                  {batch.import_containers.container_ref}
+                </div>
+              )}
+              {batch.cost_locked && (
+                <div className="text-xs text-amber-600 font-medium">🔒 Locked</div>
+              )}
+            </>
+          ) : (
+            <div className="text-gray-400 text-xs">Not allocated</div>
           )}
         </div>
       )
@@ -726,6 +788,25 @@ export function Batches() {
                     onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
                     className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Import Container (Optional)
+                  </label>
+                  <select
+                    value={formData.import_container_id}
+                    onChange={(e) => setFormData({ ...formData, import_container_id: e.target.value })}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="">Select Container (Optional)</option>
+                    {importContainers.map((container) => (
+                      <option key={container.id} value={container.id}>
+                        {container.container_ref} ({container.status})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-0.5">Link batch to import container for cost allocation</p>
                 </div>
               </div>
             </div>

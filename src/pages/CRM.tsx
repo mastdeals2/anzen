@@ -4,15 +4,21 @@ import { Modal } from '../components/Modal';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Plus, Mail, Calendar as CalendarIcon, LayoutGrid, Users, Table, Inbox, Activity, Clock, Archive } from 'lucide-react';
-import { EmailInbox } from '../components/crm/EmailInbox';
+import { GmailBrowserInbox } from '../components/crm/GmailBrowserInbox';
 import { InquiryTableExcel } from '../components/crm/InquiryTableExcel';
 import { ReminderCalendar } from '../components/crm/ReminderCalendar';
 import { PipelineBoard } from '../components/crm/PipelineBoard';
 import { EmailComposer } from '../components/crm/EmailComposer';
 import { CustomerDatabase } from '../components/crm/CustomerDatabase';
+import { CustomerDatabaseExcel } from '../components/crm/CustomerDatabaseExcel';
 import { ActivityLogger } from '../components/crm/ActivityLogger';
 import { AppointmentScheduler } from '../components/crm/AppointmentScheduler';
 import { ArchiveView } from '../components/crm/ArchiveView';
+import { CompactInquiryForm } from '../components/crm/CompactInquiryForm';
+import { CustomerSelectionDialog } from '../components/crm/CustomerSelectionDialog';
+import { CustomerConfirmationDialog } from '../components/crm/CustomerConfirmationDialog';
+import { CustomerUpdateDialog } from '../components/crm/CustomerUpdateDialog';
+import { fuzzyMatchCompanyName, detectCustomerChanges, findBestMatch } from '../utils/customerMatching';
 
 interface Inquiry {
   id: string;
@@ -71,40 +77,20 @@ export function CRM() {
   const { profile } = useAuth();
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'table' | 'pipeline' | 'calendar' | 'email' | 'customers' | 'activities' | 'appointments' | 'archive'>('table');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingInquiry, setEditingInquiry] = useState<Inquiry | null>(null);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [selectedInquiryForEmail, setSelectedInquiryForEmail] = useState<any>(null);
 
-  const [formData, setFormData] = useState({
-    product_name: '',
-    quantity: '',
-    supplier_name: '',
-    supplier_country: '',
-    company_name: '',
-    contact_person: '',
-    contact_email: '',
-    contact_phone: '',
-    mail_subject: '',
-    status: 'new',
-    pipeline_status: 'new',
-    priority: 'medium',
-    inquiry_source: 'other',
-    aceerp_no: '',
-    purchase_price: '',
-    purchase_price_currency: 'USD',
-    offered_price: '',
-    offered_price_currency: 'USD',
-    delivery_date: '',
-    delivery_terms: '',
-    price_required: false,
-    coa_required: false,
-    sample_required: false,
-    agency_letter_required: false,
-    remarks: '',
-    internal_notes: '',
-  });
+  const [pendingFormData, setPendingFormData] = useState<any>(null);
+  const [customerMatches, setCustomerMatches] = useState<any[]>([]);
+  const [showCustomerSelectionDialog, setShowCustomerSelectionDialog] = useState(false);
+  const [showCustomerConfirmationDialog, setShowCustomerConfirmationDialog] = useState(false);
+  const [showCustomerUpdateDialog, setShowCustomerUpdateDialog] = useState(false);
+  const [customerChanges, setCustomerChanges] = useState<any>(null);
+  const [inquiryCounts, setInquiryCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     loadInquiries();
@@ -112,91 +98,247 @@ export function CRM() {
 
   const loadInquiries = async () => {
     try {
+      setError(null);
       // Exclude 'lost' status inquiries from default view (they appear in Archive)
-      const { data, error } = await supabase
+      const { data, error: fetchError } = await supabase
         .from('crm_inquiries')
-        .select('*, user_profiles!crm_inquiries_assigned_to_fkey(full_name)')
+        .select('*, user_profiles!assigned_to(full_name)')
         .neq('pipeline_status', 'lost')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (fetchError) throw fetchError;
       setInquiries(data || []);
-    } catch (error) {
-      console.error('Error loading inquiries:', error);
+    } catch (err) {
+      setError('Failed to load inquiries. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const loadCustomers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('id, company_name, contact_person, email, phone, country, address, city')
+        .eq('is_active', true);
 
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error loading customers:', error);
+      return [];
+    }
+  };
+
+  const loadInquiryCounts = async (customerIds: string[]) => {
+    try {
+      const { data, error } = await supabase
+        .from('crm_inquiries')
+        .select('customer_id')
+        .in('customer_id', customerIds);
+
+      if (error) throw error;
+
+      const counts: Record<string, number> = {};
+      data?.forEach(inquiry => {
+        if (inquiry.customer_id) {
+          counts[inquiry.customer_id] = (counts[inquiry.customer_id] || 0) + 1;
+        }
+      });
+
+      setInquiryCounts(counts);
+    } catch (error) {
+      console.error('Error loading inquiry counts:', error);
+    }
+  };
+
+  const processCustomerMatching = async (formData: any) => {
+    if (formData.customer_id) {
+      const customers = await loadCustomers();
+      const selectedCustomer = customers.find(c => c.id === formData.customer_id);
+
+      if (selectedCustomer) {
+        const changes = detectCustomerChanges(
+          {
+            contact_email: formData.contact_email,
+            contact_phone: formData.contact_phone,
+            contact_person: formData.contact_person,
+          },
+          selectedCustomer
+        );
+
+        if (changes.hasChanges) {
+          setCustomerChanges({
+            ...changes,
+            customer: selectedCustomer,
+          });
+          setPendingFormData(formData);
+          setShowCustomerUpdateDialog(true);
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    const customers = await loadCustomers();
+    const matches = fuzzyMatchCompanyName(formData.company_name, customers);
+
+    if (matches.length > 0) {
+      const bestMatch = findBestMatch(formData.company_name, customers);
+
+      if (bestMatch && bestMatch.score >= 95) {
+        formData.customer_id = bestMatch.customer.id;
+        return processCustomerMatching(formData);
+      } else {
+        setCustomerMatches(matches);
+        setPendingFormData(formData);
+        await loadInquiryCounts(matches.map(m => m.customer.id));
+        setShowCustomerSelectionDialog(true);
+        return false;
+      }
+    } else {
+      setPendingFormData(formData);
+      setShowCustomerConfirmationDialog(true);
+      return false;
+    }
+  };
+
+  const sanitizeFormData = (data: any) => {
+    const sanitized = { ...data };
+    // Convert empty strings to null for date and numeric fields
+    const dateFields = ['delivery_date', 'inquiry_date'];
+    const numericFields = ['purchase_price', 'offered_price'];
+
+    dateFields.forEach(field => {
+      if (sanitized[field] === '' || sanitized[field] === undefined) {
+        sanitized[field] = null;
+      }
+    });
+
+    numericFields.forEach(field => {
+      if (sanitized[field] === '' || sanitized[field] === undefined) {
+        sanitized[field] = null;
+      } else if (sanitized[field] !== null) {
+        sanitized[field] = parseFloat(sanitized[field]);
+      }
+    });
+
+    return sanitized;
+  };
+
+  const handleFormSubmit = async (formData: any) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
+      if (!editingInquiry) {
+        const canProceed = await processCustomerMatching(formData);
+        if (!canProceed) {
+          return;
+        }
+
+        if (!formData.customer_id) {
+          alert('Customer selection is required. Please select or create a customer.');
+          return;
+        }
+      }
+
       if (editingInquiry) {
+        // Extract products and is_multi_product from formData before update
+        const { products, is_multi_product, ...restFormData } = formData;
+
+        const updateData: any = sanitizeFormData({
+          ...restFormData,
+          specification: formData.specification || null,
+          purchase_price: formData.purchase_price ? parseFloat(formData.purchase_price) : null,
+          offered_price: formData.offered_price ? parseFloat(formData.offered_price) : null,
+        });
+
         const { error } = await supabase
           .from('crm_inquiries')
-          .update(formData)
+          .update(updateData)
           .eq('id', editingInquiry.id);
 
         if (error) throw error;
       } else {
-        const lastInquiry = await supabase
-          .from('crm_inquiries')
-          .select('inquiry_number')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        // Extract products and is_multi_product from formData before insert
+        const { products, is_multi_product, ...restFormData } = formData;
 
-        let nextNumber = 500;
-        if (lastInquiry.data?.inquiry_number) {
-          const num = parseInt(lastInquiry.data.inquiry_number);
-          if (!isNaN(num)) {
-            nextNumber = num + 1;
-          }
-        }
-
-        const { error } = await supabase
-          .from('crm_inquiries')
-          .insert([{
-            ...formData,
-            inquiry_number: nextNumber.toString(),
+        // If multi-product, create N separate inquiries in crm_inquiries with .1, .2, .3 suffixes
+        // All common fields are copied to each inquiry
+        if (is_multi_product && products && products.length > 0) {
+          // Create inquiries for each product
+          const inquiriesToInsert = products.map((product: any) => sanitizeFormData({
+            ...restFormData,
+            product_name: product.productName || product.product_name,
+            specification: product.specification || null,
+            quantity: product.quantity,
+            supplier_name: product.supplierName || restFormData.supplier_name || null,
+            supplier_country: product.supplierCountry || restFormData.supplier_country || null,
+            delivery_date: product.deliveryDate || null,
+            delivery_terms: product.deliveryTerms || null,
             inquiry_date: new Date().toISOString().split('T')[0],
             assigned_to: user.id,
             created_by: user.id,
-          }]);
+            purchase_price: null,
+            offered_price: null,
+            is_multi_product: false,
+            has_items: false,
+          }));
 
-        if (error) throw error;
+          const { data: insertedInquiries, error } = await supabase
+            .from('crm_inquiries')
+            .insert(inquiriesToInsert)
+            .select();
+
+          if (error) throw error;
+
+          // Update inquiry numbers to add .1, .2, .3 suffixes
+          if (insertedInquiries && insertedInquiries.length > 0) {
+            const baseInquiryNumber = insertedInquiries[0].inquiry_number;
+
+            for (let i = 0; i < insertedInquiries.length; i++) {
+              await supabase
+                .from('crm_inquiries')
+                .update({ inquiry_number: `${baseInquiryNumber}.${i + 1}` })
+                .eq('id', insertedInquiries[i].id);
+            }
+          }
+        } else {
+          // Single product inquiry
+          const insertData: any = sanitizeFormData({
+            ...restFormData,
+            specification: formData.specification || null,
+            inquiry_date: new Date().toISOString().split('T')[0],
+            assigned_to: user.id,
+            created_by: user.id,
+            purchase_price: formData.purchase_price ? parseFloat(formData.purchase_price) : null,
+            offered_price: formData.offered_price ? parseFloat(formData.offered_price) : null,
+            is_multi_product: false,
+            has_items: false,
+          });
+
+          const { error } = await supabase
+            .from('crm_inquiries')
+            .insert([insertData]);
+
+          if (error) throw error;
+        }
       }
 
       setModalOpen(false);
-      resetForm();
+      setEditingInquiry(null);
       loadInquiries();
     } catch (error) {
       console.error('Error saving inquiry:', error);
       alert('Failed to save inquiry. Please try again.');
+      throw error;
     }
   };
 
   const handleEdit = (inquiry: Inquiry) => {
     setEditingInquiry(inquiry);
-    setFormData({
-      product_name: inquiry.product_name,
-      quantity: inquiry.quantity,
-      supplier_name: inquiry.supplier_name || '',
-      supplier_country: inquiry.supplier_country || '',
-      company_name: inquiry.company_name,
-      contact_person: inquiry.contact_person || '',
-      contact_email: inquiry.contact_email || '',
-      contact_phone: inquiry.contact_phone || '',
-      status: inquiry.status,
-      priority: inquiry.priority,
-      inquiry_source: (inquiry as any).inquiry_source || 'other',
-      remarks: inquiry.remarks || '',
-      internal_notes: inquiry.internal_notes || '',
-    });
     setModalOpen(true);
   };
 
@@ -217,6 +359,71 @@ export function CRM() {
     }
   };
 
+  const handleCustomerSelect = (customer: any) => {
+    if (pendingFormData) {
+      pendingFormData.customer_id = customer.id;
+      setShowCustomerSelectionDialog(false);
+      handleFormSubmit(pendingFormData);
+    }
+  };
+
+  const handleCreateNewCustomer = async (customerData: any) => {
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .insert({
+          ...customerData,
+          is_active: true,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (pendingFormData) {
+        pendingFormData.customer_id = data.id;
+        setShowCustomerConfirmationDialog(false);
+        handleFormSubmit(pendingFormData);
+      }
+    } catch (error) {
+      console.error('Error creating customer:', error);
+      throw error;
+    }
+  };
+
+  const handleUpdateCustomer = async () => {
+    if (!customerChanges || !customerChanges.customer) return;
+
+    try {
+      const updateData: any = {};
+      customerChanges.changedFields.forEach((field: string) => {
+        updateData[field] = customerChanges.newValues[field];
+      });
+
+      const { error } = await supabase
+        .from('customers')
+        .update(updateData)
+        .eq('id', customerChanges.customer.id);
+
+      if (error) throw error;
+
+      setShowCustomerUpdateDialog(false);
+      if (pendingFormData) {
+        handleFormSubmit(pendingFormData);
+      }
+    } catch (error) {
+      console.error('Error updating customer:', error);
+      alert('Failed to update customer. Please try again.');
+    }
+  };
+
+  const handleKeepExistingCustomer = () => {
+    setShowCustomerUpdateDialog(false);
+    if (pendingFormData) {
+      handleFormSubmit(pendingFormData);
+    }
+  };
+
   const handleSendEmail = (inquiry: Inquiry) => {
     setSelectedInquiryForEmail({
       id: inquiry.id,
@@ -230,60 +437,14 @@ export function CRM() {
     setEmailModalOpen(true);
   };
 
-  const resetForm = () => {
-    setEditingInquiry(null);
-    setFormData({
-      product_name: '',
-      quantity: '',
-      supplier_name: '',
-      supplier_country: '',
-      company_name: '',
-      contact_person: '',
-      contact_email: '',
-      contact_phone: '',
-      mail_subject: '',
-      status: 'new',
-      pipeline_status: 'new',
-      priority: 'medium',
-      inquiry_source: 'other',
-      aceerp_no: '',
-      purchase_price: '',
-      purchase_price_currency: 'USD',
-      offered_price: '',
-      offered_price_currency: 'USD',
-      delivery_date: '',
-      delivery_terms: '',
-      price_required: false,
-      coa_required: false,
-      sample_required: false,
-      agency_letter_required: false,
-      remarks: '',
-      internal_notes: '',
-    });
-  };
 
   const canManage = profile?.role === 'admin' || profile?.role === 'sales';
 
   return (
     <Layout>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">CRM - Inquiry Management</h1>
-            <p className="text-gray-600 mt-1">Manage pharmaceutical inquiries with AI-powered email processing</p>
-          </div>
-          {canManage && (
-            <button
-              onClick={() => {
-                resetForm();
-                setModalOpen(true);
-              }}
-              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
-            >
-              <Plus className="w-5 h-5" />
-              Add Inquiry
-            </button>
-          )}
+      <div className="space-y-4">
+        <div className="flex items-center">
+          <h1 className="text-xl font-semibold text-gray-900">CRM - Inquiry Management</h1>
         </div>
 
         <div className="bg-white rounded-lg shadow">
@@ -381,8 +542,20 @@ export function CRM() {
           </div>
 
           <div className="p-6">
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4 flex items-center justify-between">
+                <p className="text-red-700">{error}</p>
+                <button
+                  onClick={loadInquiries}
+                  className="px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+            
             {activeTab === 'email' && (
-              <EmailInbox onInquiryCreated={loadInquiries} />
+              <GmailBrowserInbox />
             )}
 
             {activeTab === 'table' && (
@@ -390,6 +563,10 @@ export function CRM() {
                 inquiries={inquiries}
                 onRefresh={loadInquiries}
                 canManage={canManage}
+                onAddInquiry={() => {
+                  setEditingInquiry(null);
+                  setModalOpen(true);
+                }}
               />
             )}
 
@@ -405,7 +582,7 @@ export function CRM() {
             )}
 
             {activeTab === 'customers' && (
-              <CustomerDatabase canManage={canManage} />
+              <CustomerDatabaseExcel />
             )}
 
             {activeTab === 'activities' && (
@@ -426,217 +603,19 @@ export function CRM() {
           isOpen={modalOpen}
           onClose={() => {
             setModalOpen(false);
-            resetForm();
+            setEditingInquiry(null);
           }}
           title={editingInquiry ? 'Edit Inquiry' : 'Add New Inquiry'}
         >
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Product Name *
-                </label>
-                <input
-                  type="text"
-                  value={formData.product_name}
-                  onChange={(e) => setFormData({ ...formData, product_name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Quantity *
-                </label>
-                <input
-                  type="text"
-                  value={formData.quantity}
-                  onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  required
-                  placeholder="e.g., 150 KG"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Priority *
-                </label>
-                <select
-                  value={formData.priority}
-                  onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                  <option value="urgent">Urgent</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Inquiry Source *
-                </label>
-                <select
-                  value={formData.inquiry_source}
-                  onChange={(e) => setFormData({ ...formData, inquiry_source: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="email">Email</option>
-                  <option value="whatsapp">WhatsApp</option>
-                  <option value="phone_call">Phone Call</option>
-                  <option value="walk_in">Walk-in</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Supplier Name
-                </label>
-                <input
-                  type="text"
-                  value={formData.supplier_name}
-                  onChange={(e) => setFormData({ ...formData, supplier_name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., Omochi Seiyaku"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Country of Origin
-                </label>
-                <input
-                  type="text"
-                  value={formData.supplier_country}
-                  onChange={(e) => setFormData({ ...formData, supplier_country: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., Japan"
-                />
-              </div>
-
-              <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Company Name *
-                </label>
-                <input
-                  type="text"
-                  value={formData.company_name}
-                  onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Contact Person
-                </label>
-                <input
-                  type="text"
-                  value={formData.contact_person}
-                  onChange={(e) => setFormData({ ...formData, contact_person: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  value={formData.contact_email}
-                  onChange={(e) => setFormData({ ...formData, contact_email: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Phone
-                </label>
-                <input
-                  type="text"
-                  value={formData.contact_phone}
-                  onChange={(e) => setFormData({ ...formData, contact_phone: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Status *
-                </label>
-                <select
-                  value={formData.status}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="new">New</option>
-                  <option value="price_quoted">Price Quoted</option>
-                  <option value="coa_pending">COA Pending</option>
-                  <option value="sample_sent">Sample Sent</option>
-                  <option value="negotiation">Negotiation</option>
-                  <option value="po_received">PO Received</option>
-                  <option value="won">Won</option>
-                  <option value="lost">Lost</option>
-                  <option value="on_hold">On Hold</option>
-                </select>
-              </div>
-
-              <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Remarks
-                </label>
-                <textarea
-                  value={formData.remarks}
-                  onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  rows={3}
-                  placeholder="Customer-facing remarks"
-                />
-              </div>
-
-              <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Internal Notes
-                </label>
-                <textarea
-                  value={formData.internal_notes}
-                  onChange={(e) => setFormData({ ...formData, internal_notes: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  rows={2}
-                  placeholder="Internal notes (not visible to customer)"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 pt-4 border-t">
-              <button
-                type="button"
-                onClick={() => {
-                  setModalOpen(false);
-                  resetForm();
-                }}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-              >
-                {editingInquiry ? 'Update Inquiry' : 'Add Inquiry'}
-              </button>
-            </div>
-          </form>
+          <CompactInquiryForm
+            onSubmit={handleFormSubmit}
+            onCancel={() => {
+              setModalOpen(false);
+              setEditingInquiry(null);
+            }}
+            initialData={editingInquiry}
+            isEditing={!!editingInquiry}
+          />
         </Modal>
 
         <Modal
@@ -658,6 +637,52 @@ export function CRM() {
             }}
           />
         </Modal>
+
+        <CustomerSelectionDialog
+          isOpen={showCustomerSelectionDialog}
+          matches={customerMatches}
+          searchTerm={pendingFormData?.company_name || ''}
+          onSelect={handleCustomerSelect}
+          onCreateNew={() => {
+            setShowCustomerSelectionDialog(false);
+            setShowCustomerConfirmationDialog(true);
+          }}
+          onCancel={() => {
+            setShowCustomerSelectionDialog(false);
+            setPendingFormData(null);
+          }}
+          inquiryCounts={inquiryCounts}
+        />
+
+        <CustomerConfirmationDialog
+          isOpen={showCustomerConfirmationDialog}
+          initialData={{
+            company_name: pendingFormData?.company_name || '',
+            contact_person: pendingFormData?.contact_person || '',
+            email: pendingFormData?.contact_email || '',
+            phone: pendingFormData?.contact_phone || '',
+            country: pendingFormData?.supplier_country || 'Indonesia',
+          }}
+          onConfirm={handleCreateNewCustomer}
+          onCancel={() => {
+            setShowCustomerConfirmationDialog(false);
+            setPendingFormData(null);
+          }}
+        />
+
+        <CustomerUpdateDialog
+          isOpen={showCustomerUpdateDialog}
+          customerName={customerChanges?.customer?.company_name || ''}
+          changedFields={customerChanges?.changedFields || []}
+          oldValues={customerChanges?.oldValues || {}}
+          newValues={customerChanges?.newValues || {}}
+          onUpdateCustomer={handleUpdateCustomer}
+          onKeepExisting={handleKeepExistingCustomer}
+          onCancel={() => {
+            setShowCustomerUpdateDialog(false);
+            setPendingFormData(null);
+          }}
+        />
       </div>
     </Layout>
   );

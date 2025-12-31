@@ -69,6 +69,7 @@ function parseDeliveryDate(dateStr: string | undefined | null): string | null {
 }
 
 export function CRMCommandCenter() {
+  console.log('[CRMCommandCenter] Component loaded - Dec 7 2025 v1.2'); // Version check
   const { profile } = useAuth();
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   const [parsedData, setParsedData] = useState<ParsedEmailData | null>(null);
@@ -76,6 +77,7 @@ export function CRMCommandCenter() {
   const [saving, setSaving] = useState(false);
 
   const handleEmailSelect = (email: Email, data: ParsedEmailData | null) => {
+    console.log('[CRMCommandCenter] handleEmailSelect called', { email, data });
     setSelectedEmail(email);
     setParsedData(data);
     setCreatedInquiry(null);
@@ -92,12 +94,22 @@ export function CRMCommandCenter() {
 
       // Check if customer exists by email or company name
       let customerId = null;
-      const { data: existingCustomers } = await supabase
-        .from('customers')
+      // Use only the first email address for lookup if multiple emails provided
+      const primaryEmail = formData.contactEmail.split(/[,;]/)[0].trim();
+
+      console.log('[CRMCommandCenter] Looking up customer with primaryEmail:', primaryEmail);
+
+      const { data: existingCustomers, error: lookupError } = await supabase
+        .from('crm_contacts')
         .select('id, company_name, email, contact_person, phone, address')
-        .or(`email.eq.${formData.contactEmail},company_name.ilike.${formData.companyName}`)
+        .or(`email.eq.${primaryEmail},company_name.ilike.${formData.companyName}`)
         .limit(1)
         .maybeSingle();
+
+      if (lookupError) {
+        console.error('[CRMCommandCenter] Customer lookup error:', lookupError);
+        throw lookupError;
+      }
 
       if (existingCustomers) {
         customerId = existingCustomers.id;
@@ -116,16 +128,15 @@ export function CRMCommandCenter() {
 
         if (Object.keys(updates).length > 0) {
           await supabase
-            .from('customers')
+            .from('crm_contacts')
             .update({ ...updates, updated_at: new Date().toISOString() })
             .eq('id', customerId);
         }
       } else {
         // Create new customer
         const { data: newCustomer, error: customerError } = await supabase
-          .from('customers')
+          .from('crm_contacts')
           .insert({
-            customer_name: formData.companyName,
             company_name: formData.companyName,
             contact_person: formData.contactPerson || null,
             email: formData.contactEmail,
@@ -136,9 +147,18 @@ export function CRMCommandCenter() {
           .select()
           .single();
 
-        if (!customerError && newCustomer) {
+        if (customerError) {
+          console.error('[CRMCommandCenter] Customer creation error:', customerError);
+          throw new Error(`Failed to create customer: ${customerError.message}`);
+        }
+
+        if (newCustomer) {
           customerId = newCustomer.id;
         }
+      }
+
+      if (!customerId) {
+        throw new Error('Failed to get or create customer ID');
       }
 
       const inquiryData = {
@@ -153,10 +173,11 @@ export function CRMCommandCenter() {
         contact_person: formData.contactPerson || null,
         contact_email: formData.contactEmail,
         contact_phone: formData.contactPhone || null,
-        email_subject: selectedEmail.subject,
+        mail_subject: selectedEmail.subject,
         email_body: selectedEmail.body,
         inquiry_source: 'email',
         status: 'new',
+        pipeline_status: 'new',
         priority: formData.priority,
         purpose_icons: formData.purposeIcons,
         delivery_date_expected: parseDeliveryDate(formData.deliveryDateExpected),
@@ -167,20 +188,88 @@ export function CRMCommandCenter() {
         msds_sent: false,
         sample_sent: false,
         price_quoted: false,
+        // New fields for unified tracking
+        price_required: formData.priceRequested,
+        coa_required: formData.coaRequested,
+        sample_required: formData.sampleRequested,
+        agency_letter_required: formData.agencyLetterRequested || false,
+        aceerp_no: formData.aceerp_no || null,
+        purchase_price: formData.purchasePrice ? parseFloat(formData.purchasePrice) : null,
+        purchase_price_currency: formData.purchasePriceCurrency || 'USD',
+        offered_price: formData.offeredPrice ? parseFloat(formData.offeredPrice) : null,
+        offered_price_currency: formData.offeredPriceCurrency || 'USD',
+        delivery_date: formData.deliveryDate || null,
+        delivery_terms: formData.deliveryTerms || null,
         remarks: formData.remarks || null,
         assigned_to: user.id,
         created_by: user.id,
         source: 'email',
-        source_email_id: selectedEmail.id,
+        source_email_id: selectedEmail.id.startsWith('gmail-') ? null : selectedEmail.id,
       };
 
-      const { data: inquiry, error: inquiryError } = await supabase
-        .from('crm_inquiries')
-        .insert([inquiryData])
-        .select()
-        .single();
+      // If multi-product, create N separate inquiries in crm_inquiries with .1, .2, .3 suffixes
+      // All common fields are copied to each inquiry
+      let inquiry: any;
 
-      if (inquiryError) throw inquiryError;
+      if (formData.isMultiProduct && formData.products && formData.products.length > 0) {
+        const inquiriesToInsert = formData.products.map((product) => ({
+          ...inquiryData,
+          product_name: product.productName,
+          specification: product.specification || null,
+          quantity: product.quantity,
+          supplier_name: product.supplierName || inquiryData.supplier_name || null,
+          supplier_country: product.supplierCountry || inquiryData.supplier_country || null,
+          delivery_date: product.deliveryDate || inquiryData.delivery_date || null,
+          delivery_terms: product.deliveryTerms || inquiryData.delivery_terms || null,
+          is_multi_product: false,
+          has_items: false,
+        }));
+
+        console.log('[CRMCommandCenter] Inserting multi-product inquiries:', inquiriesToInsert.length, 'items');
+
+        const { data: inquiries, error: inquiryError } = await supabase
+          .from('crm_inquiries')
+          .insert(inquiriesToInsert)
+          .select();
+
+        if (inquiryError) {
+          console.error('[CRMCommandCenter] Multi-product insert error:', inquiryError);
+          throw inquiryError;
+        }
+
+        // Update inquiry numbers to add .1, .2, .3 suffixes
+        if (inquiries && inquiries.length > 0) {
+          const baseInquiryNumber = inquiries[0].inquiry_number;
+
+          for (let i = 0; i < inquiries.length; i++) {
+            await supabase
+              .from('crm_inquiries')
+              .update({ inquiry_number: `${baseInquiryNumber}.${i + 1}` })
+              .eq('id', inquiries[i].id);
+          }
+
+          inquiry = inquiries[0];
+        }
+      } else {
+        // Single product inquiry
+        console.log('[CRMCommandCenter] Inserting single product inquiry');
+
+        const { data: singleInquiry, error: inquiryError } = await supabase
+          .from('crm_inquiries')
+          .insert([{
+            ...inquiryData,
+            is_multi_product: false,
+            has_items: false,
+          }])
+          .select()
+          .single();
+
+        if (inquiryError) {
+          console.error('[CRMCommandCenter] Single product insert error:', inquiryError);
+          throw inquiryError;
+        }
+        inquiry = singleInquiry;
+      }
 
       await supabase
         .from('crm_email_inbox')
@@ -191,8 +280,19 @@ export function CRMCommandCenter() {
         })
         .eq('id', selectedEmail.id);
 
-      if (formData.coaRequested || formData.msdsRequested || formData.sampleRequested || formData.priceRequested) {
+      if (formData.coaRequested || formData.msdsRequested || formData.sampleRequested || formData.priceRequested || formData.agencyLetterRequested) {
         const reminders = [];
+
+        if (formData.priceRequested) {
+          reminders.push({
+            inquiry_id: inquiry.id,
+            reminder_type: 'send_price',
+            title: 'Send price quote to customer',
+            due_date: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString(),
+            assigned_to: user.id,
+            created_by: user.id,
+          });
+        }
 
         if (formData.coaRequested) {
           reminders.push({
@@ -208,7 +308,7 @@ export function CRMCommandCenter() {
         if (formData.msdsRequested) {
           reminders.push({
             inquiry_id: inquiry.id,
-            reminder_type: 'send_coa',
+            reminder_type: 'send_msds',
             title: 'Send MSDS to customer',
             due_date: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
             assigned_to: user.id,
@@ -227,11 +327,11 @@ export function CRMCommandCenter() {
           });
         }
 
-        if (formData.priceRequested) {
+        if (formData.agencyLetterRequested) {
           reminders.push({
             inquiry_id: inquiry.id,
-            reminder_type: 'send_price',
-            title: 'Send price quote to customer',
+            reminder_type: 'send_agency_letter',
+            title: 'Send agency letter to customer',
             due_date: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString(),
             assigned_to: user.id,
             created_by: user.id,
@@ -246,13 +346,19 @@ export function CRMCommandCenter() {
       setCreatedInquiry(inquiry);
       setParsedData(null);
 
-      alert(`Inquiry #${inquiry.inquiry_number} created successfully!\n\nUse Quick Actions to send documents.`);
+      const successMsg = formData.isMultiProduct && formData.products
+        ? `Inquiry #${inquiry.inquiry_number} created successfully with ${formData.products.length} product line items!\n\nUse Quick Actions to send documents for each product.`
+        : `Inquiry #${inquiry.inquiry_number} created successfully!\n\nUse Quick Actions to send documents.`;
+
+      alert(successMsg);
     } catch (error: any) {
-      console.error('Error creating inquiry:', error);
+      console.error('[CRMCommandCenter] Error creating inquiry:', error);
+      console.error('[CRMCommandCenter] Error details:', JSON.stringify(error, null, 2));
       if (error.message?.includes('duplicate key')) {
         alert('This inquiry number already exists. Please use a different number.');
       } else {
-        alert('Failed to create inquiry. Please try again.');
+        const errorMsg = error.message || error.details || error.hint || 'Unknown error';
+        alert(`Failed to create inquiry: ${errorMsg}\n\nCheck console for details.`);
       }
     } finally {
       setSaving(false);
@@ -268,21 +374,18 @@ export function CRMCommandCenter() {
   return (
     <Layout>
       <div className="h-screen flex flex-col">
-        <div className="flex-shrink-0 bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 border-b border-blue-800">
+        <div className="flex-shrink-0 bg-gradient-to-r from-blue-600 to-blue-700 px-4 py-2 border-b border-blue-800">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                <Zap className="w-7 h-7" />
-                CRM Command Center
-              </h1>
-              <p className="text-blue-100 text-sm mt-1">
-                Ultra-fast inquiry processing with AI automation
-              </p>
+            <div className="flex items-center gap-2">
+              <Zap className="w-5 h-5 text-white" />
+              <div>
+                <h1 className="text-lg font-bold text-white">CRM Command Center</h1>
+                <p className="text-blue-100 text-xs">AI-powered inquiry processing</p>
+              </div>
             </div>
             <div className="text-right">
-              <p className="text-xs text-blue-200">Total Clicks Required</p>
-              <p className="text-3xl font-bold text-white">2</p>
-              <p className="text-xs text-blue-100">Email → Save</p>
+              <p className="text-xs text-blue-200">Quick Actions</p>
+              <p className="text-xl font-bold text-white">2 Clicks</p>
             </div>
           </div>
         </div>
