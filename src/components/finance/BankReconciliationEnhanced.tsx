@@ -172,18 +172,57 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
     }
   };
 
+  const parseCSVLine = (line: string, delimiter: string = ';'): string[] => {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === delimiter && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+
+    result.push(current.trim());
+    return result;
+  };
+
   const handleCSVUpload = async (file: File) => {
     try {
       const reader = new FileReader();
       reader.onload = async (event) => {
         try {
           const text = event.target?.result as string;
-          const lines = text.split('\n');
           const rows: any[][] = [];
+          let currentLine = '';
+          let inQuotes = false;
 
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            const cells = line.split(';').map(c => c.trim());
+          for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+
+            if (char === '"') {
+              inQuotes = !inQuotes;
+              currentLine += char;
+            } else if (char === '\n' && !inQuotes) {
+              if (currentLine.trim()) {
+                const cells = parseCSVLine(currentLine);
+                rows.push(cells);
+              }
+              currentLine = '';
+            } else if (char !== '\r') {
+              currentLine += char;
+            }
+          }
+
+          if (currentLine.trim()) {
+            const cells = parseCSVLine(currentLine);
             rows.push(cells);
           }
 
@@ -642,12 +681,9 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
 
       let description = '';
       if (descCol >= 0) {
-        const descParts = [
-          String(row[descCol] || '').trim(),
-          String(row[descCol + 1] || '').trim(),
-          String(row[descCol + 2] || '').trim()
-        ].filter(p => p && !p.match(/^(DB|CR)$/i) && !p.match(/^[\d,\.]+$/));
-        description = descParts.join(' ').trim();
+        const type = String(row[descCol] || '').trim();
+        const details = String(row[descCol + 1] || '').trim();
+        description = [type, details].filter(p => p).join(' - ').replace(/\s+/g, ' ');
       }
       const branch = branchCol >= 0 ? String(row[branchCol] || '').trim() : '';
 
