@@ -23,6 +23,10 @@ interface FinanceExpense {
   import_containers?: { container_ref: string } | null;
   delivery_challans?: { challan_number: string } | null;
   bank_accounts?: { bank_name: string; account_number: string } | null;
+  bank_statement_lines?: Array<{
+    bank_account_id: string;
+    bank_accounts?: { bank_name: string; account_number: string } | null;
+  }> | null;
 }
 
 interface Batch {
@@ -216,7 +220,11 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
             batches(batch_number),
             import_containers(container_ref),
             delivery_challans(challan_number),
-            bank_accounts(bank_name, account_number)
+            bank_accounts(bank_name, account_number),
+            bank_statement_lines(
+              bank_account_id,
+              bank_accounts(bank_name, account_number)
+            )
           `)
           .order('expense_date', { ascending: false })
           .order('created_at', { ascending: false }),
@@ -521,6 +529,7 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Context</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Payment Method</th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Treatment</th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Bank Recon</th>
               {canManage && <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>}
@@ -529,13 +538,13 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
           <tbody className="bg-white divide-y divide-gray-200">
             {loading ? (
               <tr>
-                <td colSpan={canManage ? 8 : 7} className="px-6 py-8 text-center text-gray-500">
+                <td colSpan={canManage ? 9 : 8} className="px-6 py-8 text-center text-gray-500">
                   Loading...
                 </td>
               </tr>
             ) : filteredExpenses.length === 0 ? (
               <tr>
-                <td colSpan={canManage ? 8 : 7} className="px-6 py-8 text-center text-gray-500">
+                <td colSpan={canManage ? 9 : 8} className="px-6 py-8 text-center text-gray-500">
                   No expenses found
                 </td>
               </tr>
@@ -543,6 +552,12 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
               filteredExpenses.map((expense) => {
                 const category = expenseCategories.find(c => c.value === expense.expense_category);
                 const isReconciled = reconciledExpenseIds.has(expense.id);
+
+                // Get bank info from reconciled statement line
+                const reconciledBankInfo = expense.bank_statement_lines && expense.bank_statement_lines.length > 0
+                  ? expense.bank_statement_lines[0].bank_accounts
+                  : null;
+
                 return (
                   <tr key={expense.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -585,6 +600,21 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
                       <div className="text-sm font-medium text-gray-900">
                         {formatCurrency(expense.amount)}
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                      {isReconciled && reconciledBankInfo ? (
+                        <div className="text-sm">
+                          <div className="font-medium text-blue-700">{reconciledBankInfo.bank_name}</div>
+                          <div className="text-xs text-gray-500">{reconciledBankInfo.account_number}</div>
+                        </div>
+                      ) : expense.bank_account_id && expense.bank_accounts ? (
+                        <div className="text-sm">
+                          <div className="font-medium text-gray-700">{expense.bank_accounts.bank_name}</div>
+                          <div className="text-xs text-gray-500">{expense.bank_accounts.account_number}</div>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-600 capitalize">{expense.payment_method}</span>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center">
                       <span className={`inline-flex px-2 py-1 text-xs font-medium rounded border ${getTypeColor(category?.type || 'admin')}`}>

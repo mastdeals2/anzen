@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Upload, RefreshCw, CheckCircle2, AlertCircle, XCircle, Plus, Calendar, Landmark, FileText, DollarSign } from 'lucide-react';
+import { Upload, RefreshCw, CheckCircle2, AlertCircle, XCircle, Plus, Calendar, Landmark, FileText, DollarSign, Edit } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Modal } from '../Modal';
 
@@ -49,6 +49,13 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
   const [ocrError, setOcrError] = useState<{message: string; canUseOCR: boolean; suggestions: string[]} | null>(null);
   const [ocrPreview, setOcrPreview] = useState<any | null>(null);
   const [lastUploadedFile, setLastUploadedFile] = useState<File | null>(null);
+  const [editingLine, setEditingLine] = useState<StatementLine | null>(null);
+  const [editModal, setEditModal] = useState(false);
+  const [editFormData, setEditFormData] = useState({
+    debit: 0,
+    credit: 0,
+    description: '',
+  });
 
   const expenseCategories = [
     { value: 'duty_customs', label: 'Duty & Customs (BM)', type: 'import' },
@@ -1018,6 +1025,42 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
     return currency === 'USD' ? '$' : 'Rp';
   };
 
+  const openEditModal = (line: StatementLine) => {
+    setEditingLine(line);
+    setEditFormData({
+      debit: line.debit,
+      credit: line.credit,
+      description: line.description,
+    });
+    setEditModal(true);
+  };
+
+  const handleUpdateLine = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingLine) return;
+
+    try {
+      const { error } = await supabase
+        .from('bank_statement_lines')
+        .update({
+          debit_amount: editFormData.debit,
+          credit_amount: editFormData.credit,
+          description: editFormData.description,
+        })
+        .eq('id', editingLine.id);
+
+      if (error) throw error;
+
+      setEditModal(false);
+      setEditingLine(null);
+      await loadStatementLines();
+      alert('✅ Bank statement line updated successfully');
+    } catch (error: any) {
+      console.error('Error updating line:', error);
+      alert('❌ ' + error.message);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="bg-white border rounded-lg p-4">
@@ -1224,34 +1267,45 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
                     )}
                   </td>
                   <td className="px-3 py-2 text-center">
-                    {line.status === 'suggested' && (
-                      <div className="flex items-center justify-center gap-1">
+                    <div className="flex items-center justify-center gap-1">
+                      {line.status === 'suggested' && (
+                        <>
+                          <button
+                            onClick={() => confirmMatch(line.id)}
+                            className="p-1 text-green-600 hover:bg-green-50 rounded"
+                            title="Confirm Match"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => rejectMatch(line.id)}
+                            className="p-1 text-red-600 hover:bg-red-50 rounded"
+                            title="Reject Match"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                      {line.status === 'unmatched' && canManage && (
                         <button
-                          onClick={() => confirmMatch(line.id)}
-                          className="p-1 text-green-600 hover:bg-green-50 rounded"
-                          title="Confirm Match"
+                          onClick={() => openRecordModal(line)}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+                          title="Record transaction"
                         >
-                          <CheckCircle2 className="w-4 h-4" />
+                          <Plus className="w-3 h-3" />
+                          Record
                         </button>
+                      )}
+                      {canManage && (
                         <button
-                          onClick={() => rejectMatch(line.id)}
-                          className="p-1 text-red-600 hover:bg-red-50 rounded"
-                          title="Reject Match"
+                          onClick={() => openEditModal(line)}
+                          className="p-1 text-gray-600 hover:bg-gray-100 rounded"
+                          title="Edit debit/credit"
                         >
-                          <XCircle className="w-4 h-4" />
+                          <Edit className="w-4 h-4" />
                         </button>
-                      </div>
-                    )}
-                    {line.status === 'unmatched' && canManage && (
-                      <button
-                        onClick={() => openRecordModal(line)}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
-                        title="Record transaction"
-                      >
-                        <Plus className="w-3 h-3" />
-                        Record
-                      </button>
-                    )}
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1590,6 +1644,99 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           </div>
         </Modal>
       )}
+
+      {/* Edit Bank Statement Line Modal */}
+      <Modal
+        isOpen={editModal}
+        onClose={() => {
+          setEditModal(false);
+          setEditingLine(null);
+        }}
+        title="Edit Bank Statement Line"
+      >
+        {editingLine && (
+          <form onSubmit={handleUpdateLine} className="space-y-4">
+            <div className="p-3 bg-gray-50 rounded-lg">
+              <div className="text-sm text-gray-600 mb-1">Date:</div>
+              <div className="font-medium">{new Date(editingLine.date).toLocaleDateString('id-ID')}</div>
+              {editingLine.reference && (
+                <>
+                  <div className="text-sm text-gray-600 mt-2 mb-1">Reference:</div>
+                  <div className="font-medium font-mono text-sm">{editingLine.reference}</div>
+                </>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Description
+              </label>
+              <textarea
+                value={editFormData.description}
+                onChange={(e) => setEditFormData({ ...editFormData, description: e.target.value })}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-red-700 mb-1">
+                  Debit Amount
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={editFormData.debit}
+                  onChange={(e) => setEditFormData({ ...editFormData, debit: parseFloat(e.target.value) || 0, credit: 0 })}
+                  className="w-full px-3 py-2 border border-red-300 rounded-lg"
+                />
+                <p className="text-xs text-gray-500 mt-1">Money OUT (expenses)</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-green-700 mb-1">
+                  Credit Amount
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={editFormData.credit}
+                  onChange={(e) => setEditFormData({ ...editFormData, credit: parseFloat(e.target.value) || 0, debit: 0 })}
+                  className="w-full px-3 py-2 border border-green-300 rounded-lg"
+                />
+                <p className="text-xs text-gray-500 mt-1">Money IN (receipts)</p>
+              </div>
+            </div>
+
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+              <p className="text-xs text-yellow-800">
+                ⚠️ <strong>Note:</strong> Each transaction should have either a Debit OR a Credit amount, not both.
+                When you enter one, the other will be cleared.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditModal(false);
+                  setEditingLine(null);
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Update
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </div>
   );
 }
