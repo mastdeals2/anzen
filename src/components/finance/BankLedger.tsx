@@ -68,39 +68,89 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
       const opening = selectedBankData?.opening_balance || 0;
       setOpeningBalance(opening);
 
-      const { data: entries, error } = await supabase
-        .from('journal_entries')
-        .select(`
-          id,
-          entry_date,
-          reference_number,
-          description,
-          debit_amount,
-          credit_amount,
-          account:chart_of_accounts!inner(
-            account_name,
-            linked_bank_account_id
-          )
-        `)
-        .eq('account.linked_bank_account_id', selectedBank)
-        .gte('entry_date', dateRange.start)
-        .lte('entry_date', dateRange.end)
-        .order('entry_date', { ascending: true });
+      const entries: any[] = [];
 
-      if (error) throw error;
+      // Get receipt vouchers (customer payments - increases bank balance)
+      const { data: receipts } = await supabase
+        .from('receipt_vouchers')
+        .select('id, voucher_date, voucher_number, amount, description, customers(company_name)')
+        .eq('bank_account_id', selectedBank)
+        .gte('voucher_date', dateRange.start)
+        .lte('voucher_date', dateRange.end)
+        .order('voucher_date');
+
+      if (receipts) {
+        receipts.forEach(r => {
+          entries.push({
+            id: r.id,
+            entry_date: r.voucher_date,
+            particulars: `Receipt from ${(r.customers as any)?.company_name || 'Customer'}`,
+            reference: r.voucher_number,
+            debit: 0,
+            credit: r.amount,
+          });
+        });
+      }
+
+      // Get payment vouchers (supplier payments - decreases bank balance)
+      const { data: payments } = await supabase
+        .from('payment_vouchers')
+        .select('id, voucher_date, voucher_number, amount, description, suppliers(company_name)')
+        .eq('bank_account_id', selectedBank)
+        .gte('voucher_date', dateRange.start)
+        .lte('voucher_date', dateRange.end)
+        .order('voucher_date');
+
+      if (payments) {
+        payments.forEach(p => {
+          entries.push({
+            id: p.id,
+            entry_date: p.voucher_date,
+            particulars: `Payment to ${(p.suppliers as any)?.company_name || 'Supplier'}`,
+            reference: p.voucher_number,
+            debit: p.amount,
+            credit: 0,
+          });
+        });
+      }
+
+      // Get expenses paid via bank
+      const { data: expenses } = await supabase
+        .from('finance_expenses')
+        .select('id, expense_date, voucher_number, amount, description, expense_category')
+        .eq('bank_account_id', selectedBank)
+        .gte('expense_date', dateRange.start)
+        .lte('expense_date', dateRange.end)
+        .order('expense_date');
+
+      if (expenses) {
+        expenses.forEach(e => {
+          entries.push({
+            id: e.id,
+            entry_date: e.expense_date,
+            particulars: `Expense - ${e.expense_category || e.description || 'General'}`,
+            reference: e.voucher_number || '-',
+            debit: e.amount,
+            credit: 0,
+          });
+        });
+      }
+
+      // Sort by date
+      entries.sort((a, b) => new Date(a.entry_date).getTime() - new Date(b.entry_date).getTime());
 
       let runningBalance = opening;
-      const ledger: LedgerEntry[] = (entries || []).map((entry: any) => {
-        const debit = entry.debit_amount || 0;
-        const credit = entry.credit_amount || 0;
+      const ledger: LedgerEntry[] = entries.map((entry: any) => {
+        const debit = entry.debit || 0;
+        const credit = entry.credit || 0;
 
         runningBalance += credit - debit;
 
         return {
           id: entry.id,
           entry_date: entry.entry_date,
-          particulars: entry.description || entry.account?.account_name || '',
-          reference: entry.reference_number || '',
+          particulars: entry.particulars,
+          reference: entry.reference,
           debit,
           credit,
           running_balance: runningBalance,

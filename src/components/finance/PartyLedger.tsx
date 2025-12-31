@@ -55,17 +55,17 @@ export default function PartyLedger() {
 
   const loadParties = async () => {
     const tableName = partyType === 'customer' ? 'customers' : 'suppliers';
-    const nameField = partyType === 'customer' ? 'company_name' : 'name';
+    const nameField = 'company_name';
 
     const { data } = await supabase
       .from(tableName)
-      .select('id, ' + nameField + ', email, phone, address, city, npwp')
-      .order(nameField);
+      .select('id, company_name, email, phone, address, city, npwp')
+      .order('company_name');
 
     if (data) {
       setParties(data.map(p => ({
         ...p,
-        name: p[nameField] || p.name || p.company_name,
+        name: p.company_name,
         type: partyType
       })));
     }

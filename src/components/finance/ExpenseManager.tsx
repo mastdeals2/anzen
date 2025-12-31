@@ -15,10 +15,14 @@ interface FinanceExpense {
   delivery_challan_id: string | null;
   expense_type: string | null;
   document_urls: string[] | null;
+  payment_method: string;
+  bank_account_id: string | null;
+  payment_reference: string | null;
   created_at: string;
   batches?: { batch_number: string } | null;
   import_containers?: { container_ref: string } | null;
   delivery_challans?: { challan_number: string } | null;
+  bank_accounts?: { bank_name: string; account_number: string } | null;
 }
 
 interface Batch {
@@ -34,6 +38,12 @@ interface ImportContainer {
 interface DeliveryChallan {
   id: string;
   challan_number: string;
+}
+
+interface BankAccount {
+  id: string;
+  bank_name: string;
+  account_number: string;
 }
 
 interface ExpenseManagerProps {
@@ -168,6 +178,7 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [containers, setContainers] = useState<ImportContainer[]>([]);
   const [challans, setChallans] = useState<DeliveryChallan[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<FinanceExpense | null>(null);
@@ -182,6 +193,9 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
     batch_id: '',
     import_container_id: '',
     delivery_challan_id: '',
+    payment_method: 'cash',
+    bank_account_id: '',
+    payment_reference: '',
     document_urls: [] as string[],
   });
 
@@ -192,14 +206,15 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [expensesRes, batchesRes, containersRes, challansRes] = await Promise.all([
+      const [expensesRes, batchesRes, containersRes, challansRes, banksRes] = await Promise.all([
         supabase
           .from('finance_expenses')
           .select(`
             *,
             batches(batch_number),
             import_containers(container_ref),
-            delivery_challans(challan_number)
+            delivery_challans(challan_number),
+            bank_accounts(bank_name, account_number)
           `)
           .order('expense_date', { ascending: false })
           .order('created_at', { ascending: false }),
@@ -216,6 +231,10 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
           .select('id, challan_number')
           .order('challan_number', { ascending: false })
           .limit(50),
+        supabase
+          .from('bank_accounts')
+          .select('id, bank_name, account_number')
+          .order('bank_name'),
       ]);
 
       if (expensesRes.error) throw expensesRes.error;
@@ -223,6 +242,7 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
       setBatches(batchesRes.data || []);
       setContainers(containersRes.data || []);
       setChallans(challansRes.data || []);
+      setBankAccounts(banksRes.data || []);
     } catch (error: any) {
       console.error('Error loading data:', error.message);
       alert('Failed to load expenses');
@@ -270,6 +290,9 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
         batch_id: formData.batch_id || null,
         import_container_id: formData.import_container_id || null,
         delivery_challan_id: formData.delivery_challan_id || null,
+        payment_method: formData.payment_method,
+        bank_account_id: formData.bank_account_id || null,
+        payment_reference: formData.payment_reference || null,
         document_urls: allDocumentUrls.length > 0 ? allDocumentUrls : null,
       };
 
@@ -318,6 +341,9 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
       batch_id: expense.batch_id || '',
       import_container_id: expense.import_container_id || '',
       delivery_challan_id: expense.delivery_challan_id || '',
+      payment_method: expense.payment_method || 'cash',
+      bank_account_id: expense.bank_account_id || '',
+      payment_reference: expense.payment_reference || '',
       document_urls: expense.document_urls || [],
     });
     setModalOpen(true);
@@ -363,6 +389,9 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
       batch_id: '',
       import_container_id: '',
       delivery_challan_id: '',
+      payment_method: 'cash',
+      bank_account_id: '',
+      payment_reference: '',
       document_urls: [],
     });
   };
@@ -668,6 +697,65 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   required
                 />
+              </div>
+            </div>
+
+            {/* Payment Method Section */}
+            <div className="border-2 border-blue-200 rounded-lg p-4 bg-blue-50">
+              <h3 className="text-sm font-semibold text-blue-900 mb-3">Payment Details</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Payment Method <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={formData.payment_method}
+                    onChange={(e) => setFormData({ ...formData, payment_method: e.target.value, bank_account_id: e.target.value === 'cash' ? '' : formData.bank_account_id })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    required
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="bank_transfer">Bank Transfer</option>
+                    <option value="check">Check</option>
+                    <option value="giro">Giro</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+
+                {formData.payment_method !== 'cash' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Bank Account <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={formData.bank_account_id}
+                        onChange={(e) => setFormData({ ...formData, bank_account_id: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        required={formData.payment_method !== 'cash'}
+                      >
+                        <option value="">Select Bank Account</option>
+                        {bankAccounts.map((bank) => (
+                          <option key={bank.id} value={bank.id}>
+                            {bank.bank_name} - {bank.account_number}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Reference (Check#/Transfer ID)
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.payment_reference}
+                        onChange={(e) => setFormData({ ...formData, payment_reference: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        placeholder="Enter reference number"
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
