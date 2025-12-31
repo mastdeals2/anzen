@@ -312,11 +312,19 @@ export function BankReconciliation({ canManage }: BankReconciliationProps) {
       }));
 
       const allSystemTransactions = [...receipts, ...payments, ...expenses];
+      console.log('Auto-match debug:', {
+        unmatchedCount: unmatched.length,
+        receiptsCount: receipts.length,
+        paymentsCount: payments.length,
+        expensesCount: expenses.length,
+        totalSystemTxns: allSystemTransactions.length
+      });
+
       let matchedCount = 0;
       let suggestedCount = 0;
 
       for (const line of unmatched) {
-        const amount = line.debit_amount || line.credit_amount || 0;
+        const amount = Number(line.debit_amount || line.credit_amount || 0);
         const lineDate = new Date(line.transaction_date);
         const lineDesc = (line.description || '') + ' ' + (line.reference || '');
 
@@ -326,7 +334,8 @@ export function BankReconciliation({ canManage }: BankReconciliationProps) {
         for (const txn of allSystemTransactions) {
           const txnDate = new Date(txn.date);
           const dateDiff = Math.abs(lineDate.getTime() - txnDate.getTime()) / (1000 * 60 * 60 * 24);
-          const amountDiff = Math.abs(txn.amount - amount);
+          const txnAmount = Number(txn.amount);
+          const amountDiff = Math.abs(txnAmount - amount);
           const amountMatch = amountDiff < 1;
           const descSimilarity = calculateStringSimilarity(lineDesc, txn.description + ' ' + txn.reference);
 
@@ -345,6 +354,7 @@ export function BankReconciliation({ canManage }: BankReconciliationProps) {
         }
 
         if (bestMatch && bestScore >= 60) {
+          console.log(`Match found for line ${line.id}: score=${bestScore}, amount=${amount}, matchType=${bestMatch.type}`);
           const updateData: any = {
             reconciliation_status: bestScore >= 85 ? 'matched' : 'suggested',
             matched_entry_id: null,
@@ -361,13 +371,17 @@ export function BankReconciliation({ canManage }: BankReconciliationProps) {
             updateData.matched_entry_id = bestMatch.id;
           }
 
-          await supabase
+          const { error: updateError } = await supabase
             .from('bank_statement_lines')
             .update(updateData)
             .eq('id', line.id);
 
-          if (bestScore >= 85) matchedCount++;
-          else suggestedCount++;
+          if (updateError) {
+            console.error('Update error for line:', line.id, updateError);
+          } else {
+            if (bestScore >= 85) matchedCount++;
+            else suggestedCount++;
+          }
         }
       }
 
