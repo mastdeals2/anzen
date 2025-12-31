@@ -179,10 +179,12 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
   const [containers, setContainers] = useState<ImportContainer[]>([]);
   const [challans, setChallans] = useState<DeliveryChallan[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [reconciledExpenseIds, setReconciledExpenseIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<FinanceExpense | null>(null);
   const [filterType, setFilterType] = useState<'all' | 'import' | 'sales' | 'admin'>('all');
+  const [reconFilter, setReconFilter] = useState<'all' | 'reconciled' | 'not_reconciled'>('all');
   const [uploadingFiles, setUploadingFiles] = useState<File[]>([]);
 
   const [formData, setFormData] = useState({
@@ -206,7 +208,7 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [expensesRes, batchesRes, containersRes, challansRes, banksRes] = await Promise.all([
+      const [expensesRes, batchesRes, containersRes, challansRes, banksRes, bankStmtRes] = await Promise.all([
         supabase
           .from('finance_expenses')
           .select(`
@@ -235,6 +237,10 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
           .from('bank_accounts')
           .select('id, bank_name, account_number')
           .order('bank_name'),
+        supabase
+          .from('bank_statement_lines')
+          .select('matched_expense_id')
+          .not('matched_expense_id', 'is', null),
       ]);
 
       if (expensesRes.error) throw expensesRes.error;
@@ -243,6 +249,17 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
       setContainers(containersRes.data || []);
       setChallans(challansRes.data || []);
       setBankAccounts(banksRes.data || []);
+
+      // Build set of reconciled expense IDs
+      const reconciledIds = new Set<string>();
+      if (bankStmtRes.data) {
+        bankStmtRes.data.forEach(line => {
+          if (line.matched_expense_id) {
+            reconciledIds.add(line.matched_expense_id);
+          }
+        });
+      }
+      setReconciledExpenseIds(reconciledIds);
     } catch (error: any) {
       console.error('Error loading data:', error.message);
       alert('Failed to load expenses');
@@ -401,9 +418,20 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
   const requiresDC = selectedCategory?.type === 'sales';
 
   const filteredExpenses = expenses.filter(exp => {
-    if (filterType === 'all') return true;
-    const cat = expenseCategories.find(c => c.value === exp.expense_category);
-    return cat?.type === filterType;
+    // Filter by type
+    if (filterType !== 'all') {
+      const cat = expenseCategories.find(c => c.value === exp.expense_category);
+      if (cat?.type !== filterType) return false;
+    }
+
+    // Filter by reconciliation status
+    if (reconFilter === 'reconciled') {
+      return reconciledExpenseIds.has(exp.id);
+    } else if (reconFilter === 'not_reconciled') {
+      return !reconciledExpenseIds.has(exp.id);
+    }
+
+    return true;
   });
 
   const getTypeColor = (type: string) => {
@@ -440,25 +468,48 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
         )}
       </div>
 
-      <div className="flex gap-2 border-b border-gray-200">
-        {[
-          { value: 'all', label: 'All Expenses' },
-          { value: 'import', label: 'Import Costs' },
-          { value: 'sales', label: 'Sales/Delivery' },
-          { value: 'admin', label: 'Admin/Office' },
-        ].map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => setFilterType(tab.value as any)}
-            className={`px-4 py-2 font-medium transition-colors ${
-              filterType === tab.value
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="space-y-3">
+        <div className="flex gap-2 border-b border-gray-200">
+          {[
+            { value: 'all', label: 'All Expenses' },
+            { value: 'import', label: 'Import Costs' },
+            { value: 'sales', label: 'Sales/Delivery' },
+            { value: 'admin', label: 'Admin/Office' },
+          ].map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => setFilterType(tab.value as any)}
+              className={`px-4 py-2 font-medium transition-colors ${
+                filterType === tab.value
+                  ? 'text-blue-600 border-b-2 border-blue-600'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex gap-2 items-center">
+          <span className="text-sm font-medium text-gray-700">Bank Reconciliation:</span>
+          {[
+            { value: 'all', label: 'All', count: expenses.length },
+            { value: 'reconciled', label: 'Reconciled', count: expenses.filter(e => reconciledExpenseIds.has(e.id)).length },
+            { value: 'not_reconciled', label: 'Not Reconciled', count: expenses.filter(e => !reconciledExpenseIds.has(e.id)).length },
+          ].map((filter) => (
+            <button
+              key={filter.value}
+              onClick={() => setReconFilter(filter.value as any)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                reconFilter === filter.value
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {filter.label} ({filter.count})
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -471,25 +522,27 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Treatment</th>
+              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Bank Recon</th>
               {canManage && <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>}
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {loading ? (
               <tr>
-                <td colSpan={canManage ? 7 : 6} className="px-6 py-8 text-center text-gray-500">
+                <td colSpan={canManage ? 8 : 7} className="px-6 py-8 text-center text-gray-500">
                   Loading...
                 </td>
               </tr>
             ) : filteredExpenses.length === 0 ? (
               <tr>
-                <td colSpan={canManage ? 7 : 6} className="px-6 py-8 text-center text-gray-500">
+                <td colSpan={canManage ? 8 : 7} className="px-6 py-8 text-center text-gray-500">
                   No expenses found
                 </td>
               </tr>
             ) : (
               filteredExpenses.map((expense) => {
                 const category = expenseCategories.find(c => c.value === expense.expense_category);
+                const isReconciled = reconciledExpenseIds.has(expense.id);
                 return (
                   <tr key={expense.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -539,6 +592,17 @@ export function ExpenseManager({ canManage }: ExpenseManagerProps) {
                         {category?.type === 'sales' && 'EXPENSE'}
                         {category?.type === 'admin' && 'EXPENSE'}
                       </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                      {isReconciled ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-700 bg-green-50 border border-green-300 rounded">
+                          ✓ Linked to Bank
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-orange-700 bg-orange-50 border border-orange-300 rounded">
+                          ⚠ Not Reconciled
+                        </span>
+                      )}
                     </td>
                     {canManage && (
                       <td className="px-6 py-4 whitespace-nowrap text-center">
