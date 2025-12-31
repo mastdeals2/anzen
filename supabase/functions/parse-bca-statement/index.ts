@@ -87,41 +87,28 @@ Deno.serve(async (req: Request) => {
     } else {
       text = extractTextFromPDF(uint8Array);
       console.log('[INFO] Extracted', text.length, 'chars from PDF');
-
-      const isGarbage = isGarbageText(text);
-      const hasBCAMarkers = text.includes('PERIODE') || text.includes('SALDO') || text.includes('BCA');
-
-      console.log('[CHECK] Is garbage:', isGarbage, 'Has BCA markers:', hasBCAMarkers);
-
-      if (isGarbage || !hasBCAMarkers) {
-        return new Response(
-          JSON.stringify({
-            error: 'PDF text extraction failed - this appears to be an image-based or encrypted PDF.',
-            canUseOCR: true,
-            suggestions: [
-              'Use "Download as Excel" from BCA e-Banking (recommended)',
-              'Click "Run OCR Anyway" to process with optical character recognition',
-              'Upload as PNG/JPG image instead of PDF',
-              'Manually enter transactions using the Excel template'
-            ]
-          }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
     }
 
     console.log('[DEBUG] First 500 chars:', text.substring(0, 500));
-    console.log('[DEBUG] Has PERIODE:', text.includes('PERIODE'));
-    console.log('[DEBUG] Has SALDO:', text.includes('SALDO'));
 
     const parsed = parseBCAStatement(text, bankAccount.currency);
 
     if (!parsed.transactions || parsed.transactions.length === 0) {
       console.error('[ERROR] Parser found no transactions. Text length:', text.length);
       console.error('[ERROR] Text sample:', text.substring(0, 1000));
-      throw new Error(
-        'No transactions found in PDF. The document structure may not match BCA format. ' +
-        'Please use Excel export or manual entry.'
+
+      return new Response(
+        JSON.stringify({
+          error: 'No valid transactions found in PDF. The document may be encrypted or image-based.',
+          canUseOCR: true,
+          suggestions: [
+            'Use "Download as Excel" from BCA e-Banking (recommended)',
+            'Click "Run OCR Anyway" to process with optical character recognition',
+            'Upload as PNG/JPG image instead of PDF',
+            'Manually enter transactions using the Excel template'
+          ]
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -295,23 +282,6 @@ Output ONLY the extracted text, no explanations or commentary.`;
   console.log('[OCR] OpenAI extracted text sample:', extractedText.substring(0, 500));
 
   return extractedText;
-}
-
-function isGarbageText(text: string): boolean {
-  if (text.length < 100) return true;
-
-  const sample = text.substring(0, 1000);
-  let nonPrintableCount = 0;
-
-  for (let i = 0; i < sample.length; i++) {
-    const code = sample.charCodeAt(i);
-    if (code < 32 && code !== 10 && code !== 13) {
-      nonPrintableCount++;
-    }
-  }
-
-  const ratio = nonPrintableCount / sample.length;
-  return ratio > 0.15;
 }
 
 function extractTextFromPDF(pdfData: Uint8Array): string {
