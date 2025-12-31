@@ -373,9 +373,16 @@ function parseBCAStatement(text: string, currency: string) {
   const transactions: ParsedTransaction[] = [];
   let i = 0;
 
+  // BLOCK-BASED PARSER (USER'S FINAL REQUIREMENT):
+  // 1. Transaction starts when line = DATE (dd/mm)
+  // 2. Collect ALL lines after that date
+  // 3. Stop ONLY when NEXT date appears
+  // 4. Store EVERYTHING as description (NO truncation, NO summarizing)
+
   while (i < lines.length) {
     const line = lines[i];
 
+    // Check if this line is a DATE (dd/mm format)
     const dateMatch = line.match(/^(\d{2})\/(\d{2})$/);
     if (!dateMatch) {
       i++;
@@ -385,47 +392,57 @@ function parseBCAStatement(text: string, currency: string) {
     const day = parseInt(dateMatch[1]);
     const mon = parseInt(dateMatch[2]);
 
+    // Validate it's a real date
     if (day < 1 || day > 31 || mon < 1 || mon > 12) {
       i++;
       continue;
     }
 
-    const blockLines: string[] = [];
+    // Collect ALL lines until the next date
+    const descriptionLines: string[] = [];
     let j = i + 1;
 
     while (j < lines.length) {
       const nextLine = lines[j];
 
+      // Stop if we hit another date
       if (nextLine.match(/^\d{2}\/\d{2}$/)) {
         const testDay = parseInt(nextLine.split('/')[0]);
         const testMon = parseInt(nextLine.split('/')[1]);
         if (testDay >= 1 && testDay <= 31 && testMon >= 1 && testMon <= 12) {
+          // This is the next transaction's date - stop here
           break;
         }
       }
 
-      blockLines.push(nextLine);
+      // Collect this line as part of the description
+      descriptionLines.push(nextLine);
       j++;
 
-      if (blockLines.length > 30) break;
+      // Safety: don't collect more than 50 lines per transaction
+      if (descriptionLines.length > 50) break;
     }
 
-    const fullText = blockLines.join(' ');
+    // Join with newlines to preserve multi-line structure
+    const fullDescription = descriptionLines.join('\n');
 
-    if (fullText.match(/TANGGAL|KETERANGAN|CABANG|MUTASI|SALDO|Halaman|Bersambung/i)) {
+    // Skip header rows and empty transactions
+    if (fullDescription.match(/TANGGAL|KETERANGAN|CABANG|MUTASI|SALDO|Halaman|Bersambung/i)) {
       i = j;
       continue;
     }
 
-    if (fullText.trim().length < 3) {
+    if (fullDescription.trim().length < 3) {
       i = j;
       continue;
     }
 
+    // Extract amounts from the FULL description text
     const amounts: number[] = [];
     const amountPattern = /([\d,\.]+)/g;
     let amountMatch;
-    while ((amountMatch = amountPattern.exec(fullText)) !== null) {
+    const textForAmounts = descriptionLines.join(' ');
+    while ((amountMatch = amountPattern.exec(textForAmounts)) !== null) {
       const amt = parseAmount(amountMatch[1]);
       if (amt > 0 && amt < 100000000000) {
         amounts.push(amt);
@@ -437,23 +454,26 @@ function parseBCAStatement(text: string, currency: string) {
       continue;
     }
 
-    const isCredit = /\bCR\b/i.test(fullText);
+    // Determine if credit (CR) or debit (DB)
+    const isCredit = /\bCR\b/i.test(textForAmounts);
     const amount = amounts[0];
     const balance = amounts.length > 1 ? amounts[amounts.length - 1] : null;
 
+    // Extract reference (e.g., "0211/FTSCY/WS95051")
     let reference = '';
-    const refMatch = fullText.match(/\d{4}\/[\w\/]+/);
+    const refMatch = textForAmounts.match(/\d{4}\/[\w\/]+/);
     if (refMatch) {
       reference = refMatch[0];
     }
 
-    const description = blockLines.join(' | ').substring(0, 500);
+    // Store the FULL description (NO truncation, NO summarizing)
+    const description = fullDescription;
 
     const fullDate = `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
     transactions.push({
       date: fullDate,
-      description,
+      description,  // FULL multi-line description stored here
       reference,
       branchCode: '',
       debitAmount: isCredit ? 0 : amount,
@@ -461,17 +481,23 @@ function parseBCAStatement(text: string, currency: string) {
       balance,
     });
 
+    // Debug log first 5 transactions
     if (transactions.length <= 5) {
-      console.log(`[TXN] ${day}/${mon}: ${description.substring(0, 120)}`);
+      console.log(`[TXN ${transactions.length}] ${day}/${mon}:`);
+      console.log(`  Description (${description.length} chars):`);
+      console.log(`  ${description.substring(0, 200).replace(/\n/g, ' | ')}`);
+      console.log(`  Amount: ${amount}, Balance: ${balance}`);
     }
 
+    // Move to the next date
     i = j;
   }
 
   const totalDebits = transactions.reduce((s, t) => s + t.debitAmount, 0);
   const totalCredits = transactions.reduce((s, t) => s + t.creditAmount, 0);
 
-  console.log(`[RESULT] ${transactions.length} transactions, DR: ${totalDebits.toFixed(2)}, CR: ${totalCredits.toFixed(2)}`);
+  console.log(`[RESULT] Parsed ${transactions.length} transactions`);
+  console.log(`[RESULT] Total Debits: ${totalDebits.toFixed(2)}, Total Credits: ${totalCredits.toFixed(2)}`);
 
   return {
     period,
