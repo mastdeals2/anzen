@@ -26,6 +26,7 @@ import { FinancialReports } from '../components/finance/FinancialReports';
 import { BankReconciliationEnhanced as BankReconciliation } from '../components/finance/BankReconciliationEnhanced';
 import { ExpenseManager } from '../components/finance/ExpenseManager';
 import { TaxReports } from '../components/finance/TaxReports';
+import BankLedger from '../components/finance/BankLedger';
 
 interface FinanceExpense {
   id: string;
@@ -47,7 +48,7 @@ interface Batch {
 type FinanceSection = 'record' | 'track' | 'reports' | 'masters';
 type FinanceTab =
   | 'purchase_invoices' | 'receipts' | 'payments' | 'expenses' | 'petty_cash' | 'journal'
-  | 'receivables' | 'payables' | 'reconciliation' | 'ageing'
+  | 'receivables' | 'payables' | 'bank_ledger' | 'reconciliation' | 'ageing'
   | 'trial_balance' | 'pnl' | 'balance_sheet' | 'tax_reports'
   | 'coa' | 'suppliers' | 'banks' | 'tax_codes';
 
@@ -74,6 +75,7 @@ const sectionConfig = {
     tabs: [
       { id: 'receivables', label: 'Receivables', icon: TrendingUp, desc: 'Customer outstanding' },
       { id: 'payables', label: 'Payables', icon: TrendingDown, desc: 'Supplier outstanding' },
+      { id: 'bank_ledger', label: 'Bank Ledger', icon: BookOpen, desc: 'Bank book / passbook view' },
       { id: 'reconciliation', label: 'Bank Reconciliation', icon: Landmark, desc: 'Match bank statements' },
       { id: 'ageing', label: 'Ageing Report', icon: BarChart3, desc: 'Overdue analysis' },
     ]
@@ -280,6 +282,8 @@ export function Finance() {
         return <ReceivablesManager canManage={canManage} />;
       case 'payables':
         return <PayablesManager canManage={canManage} />;
+      case 'bank_ledger':
+        return <BankLedger />;
       case 'reconciliation':
         return <BankReconciliation canManage={canManage} />;
       case 'ageing':
