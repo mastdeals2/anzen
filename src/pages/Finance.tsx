@@ -4,11 +4,11 @@ import { Modal } from '../components/Modal';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { 
-  Plus, DollarSign, TrendingUp, TrendingDown, 
-  CreditCard, Receipt, BookOpen, Building2, 
+import {
+  Plus, DollarSign, TrendingUp, TrendingDown,
+  CreditCard, Receipt, BookOpen, Building2,
   ArrowDownCircle, ArrowUpCircle, Wallet, FileText, BarChart3,
-  ChevronRight, Landmark
+  ChevronRight, Landmark, Users, AlertCircle
 } from 'lucide-react';
 import { BankAccountsManager } from '../components/finance/BankAccountsManager';
 import { ReceivablesManager } from '../components/finance/ReceivablesManager';
@@ -27,6 +27,8 @@ import { BankReconciliationEnhanced as BankReconciliation } from '../components/
 import { ExpenseManager } from '../components/finance/ExpenseManager';
 import { TaxReports } from '../components/finance/TaxReports';
 import BankLedger from '../components/finance/BankLedger';
+import PartyLedger from '../components/finance/PartyLedger';
+import OutstandingSummary from '../components/finance/OutstandingSummary';
 
 interface FinanceExpense {
   id: string;
@@ -48,7 +50,7 @@ interface Batch {
 type FinanceSection = 'record' | 'track' | 'reports' | 'masters';
 type FinanceTab =
   | 'purchase_invoices' | 'receipts' | 'payments' | 'expenses' | 'petty_cash' | 'journal'
-  | 'receivables' | 'payables' | 'bank_ledger' | 'reconciliation' | 'ageing'
+  | 'party_ledger' | 'outstanding' | 'receivables' | 'payables' | 'bank_ledger' | 'reconciliation' | 'ageing'
   | 'trial_balance' | 'pnl' | 'balance_sheet' | 'tax_reports'
   | 'coa' | 'suppliers' | 'banks' | 'tax_codes';
 
@@ -73,6 +75,8 @@ const sectionConfig = {
     color: 'green',
     description: 'Monitor balances & status',
     tabs: [
+      { id: 'party_ledger', label: 'Party Ledger', icon: Users, desc: 'Customer/Supplier account book' },
+      { id: 'outstanding', label: 'Outstanding Summary', icon: AlertCircle, desc: 'Aging & follow-up report' },
       { id: 'receivables', label: 'Receivables', icon: TrendingUp, desc: 'Customer outstanding' },
       { id: 'payables', label: 'Payables', icon: TrendingDown, desc: 'Supplier outstanding' },
       { id: 'bank_ledger', label: 'Bank Ledger', icon: BookOpen, desc: 'Bank book / passbook view' },
@@ -278,6 +282,10 @@ export function Finance() {
         return <PettyCashManager canManage={canManage} />;
       case 'journal':
         return <JournalEntryViewer canManage={canManage} />;
+      case 'party_ledger':
+        return <PartyLedger />;
+      case 'outstanding':
+        return <OutstandingSummary />;
       case 'receivables':
         return <ReceivablesManager canManage={canManage} />;
       case 'payables':
