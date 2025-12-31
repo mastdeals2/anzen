@@ -87,9 +87,15 @@ Deno.serve(async (req: Request) => {
     } else {
       text = extractTextFromPDF(uint8Array);
       console.log('[INFO] Extracted', text.length, 'chars from PDF');
-    }
+      console.log('[DEBUG] First 2000 chars:', text.substring(0, 2000));
+      console.log('[DEBUG] Contains dd/mm pattern:', /\d{2}\/\d{2}/.test(text));
 
-    console.log('[DEBUG] First 500 chars:', text.substring(0, 500));
+      const sampleLines = text.split(/\n/).slice(0, 30);
+      console.log('[DEBUG] First 30 lines:');
+      sampleLines.forEach((line, idx) => {
+        if (line.trim()) console.log(`  [${idx}] ${line.substring(0, 100)}`);
+      });
+    }
 
     const parsed = parseBCAStatement(text, bankAccount.currency);
 
@@ -289,6 +295,7 @@ function extractTextFromPDF(pdfData: Uint8Array): string {
   const raw = decoder.decode(pdfData);
   const parts: string[] = [];
 
+  // Method 1: Extract text from parentheses (standard PDF text)
   const textPattern = /\(([^)]+)\)/g;
   let match;
   while ((match = textPattern.exec(raw)) !== null) {
@@ -306,7 +313,40 @@ function extractTextFromPDF(pdfData: Uint8Array): string {
   console.log(`[EXTRACT] Found ${parts.length} text blocks in PDF`);
   console.log(`[EXTRACT] Raw PDF size: ${raw.length} bytes`);
 
-  return parts.join('\n');
+  // Method 2: If no text found, try hex-encoded text
+  if (parts.length === 0) {
+    console.log('[EXTRACT] No parentheses text found, trying hex-encoded text...');
+    const hexPattern = /<([0-9A-Fa-f]+)>/g;
+    let hexMatch;
+    while ((hexMatch = hexPattern.exec(raw)) !== null) {
+      try {
+        const hexStr = hexMatch[1];
+        if (hexStr.length % 2 === 0) {
+          let decoded = '';
+          for (let i = 0; i < hexStr.length; i += 2) {
+            const byte = parseInt(hexStr.substr(i, 2), 16);
+            if (byte >= 32 && byte <= 126) {
+              decoded += String.fromCharCode(byte);
+            } else if (byte === 10) {
+              decoded += '\n';
+            } else if (byte === 32) {
+              decoded += ' ';
+            }
+          }
+          if (decoded.trim()) parts.push(decoded);
+        }
+      } catch (e) {
+        // Skip invalid hex
+      }
+    }
+    console.log(`[EXTRACT] Found ${parts.length} hex-encoded blocks`);
+  }
+
+  const finalText = parts.join('\n');
+  console.log(`[EXTRACT] Final text length: ${finalText.length} chars`);
+  console.log(`[EXTRACT] Contains dates (dd/mm)?: ${/\d{2}\/\d{2}/.test(finalText)}`);
+
+  return finalText;
 }
 
 function parseBCAStatement(text: string, currency: string) {
