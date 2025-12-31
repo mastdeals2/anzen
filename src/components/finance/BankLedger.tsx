@@ -31,6 +31,8 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
   const [loading, setLoading] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState<any | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [expenseDocuments, setExpenseDocuments] = useState<string[]>([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
   const [dateRange, setDateRange] = useState({
     start: new Date(new Date().getFullYear(), 3, 1).toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0],
@@ -52,6 +54,40 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
       loadLedgerEntries();
     }
   }, [selectedBank, dateRange]);
+
+  useEffect(() => {
+    if (showDetailModal && selectedEntry && selectedEntry.type === 'expense') {
+      loadExpenseDocuments();
+    }
+  }, [showDetailModal, selectedEntry]);
+
+  const loadExpenseDocuments = async () => {
+    if (!selectedEntry || selectedEntry.type !== 'expense') return;
+
+    setLoadingDocs(true);
+    try {
+      const { data: files } = await supabase.storage
+        .from('expense-documents')
+        .list(`${selectedEntry.id}/`);
+
+      if (files && files.length > 0) {
+        const publicUrls = files.map(file => {
+          const { data } = supabase.storage
+            .from('expense-documents')
+            .getPublicUrl(`${selectedEntry.id}/${file.name}`);
+          return data.publicUrl;
+        });
+        setExpenseDocuments(publicUrls);
+      } else {
+        setExpenseDocuments([]);
+      }
+    } catch (err) {
+      console.error('Error loading expense documents:', err);
+      setExpenseDocuments([]);
+    } finally {
+      setLoadingDocs(false);
+    }
+  };
 
   const loadBanks = async () => {
     const { data } = await supabase
@@ -520,10 +556,39 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
               </div>
 
               {selectedEntry.type === 'expense' && (
-                <div>
-                  <p className="text-sm text-gray-600">Expense Category</p>
-                  <p className="font-medium capitalize">{selectedEntry.expenseCategory?.replace('_', ' ')}</p>
-                </div>
+                <>
+                  <div>
+                    <p className="text-sm text-gray-600">Expense Category</p>
+                    <p className="font-medium capitalize">{selectedEntry.expenseCategory?.replace('_', ' ')}</p>
+                  </div>
+
+                  {loadingDocs ? (
+                    <div className="text-center py-4">
+                      <p className="text-sm text-gray-500">Loading documents...</p>
+                    </div>
+                  ) : expenseDocuments.length > 0 ? (
+                    <div>
+                      <p className="text-sm text-gray-600 mb-2">Attached Documents ({expenseDocuments.length})</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {expenseDocuments.map((url, idx) => (
+                          <a
+                            key={idx}
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block p-2 border rounded hover:bg-gray-50 text-sm text-blue-600 hover:text-blue-800 truncate"
+                          >
+                            Document {idx + 1}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-2">
+                      <p className="text-sm text-gray-400">No documents attached</p>
+                    </div>
+                  )}
+                </>
               )}
 
               {selectedEntry.type === 'receipt' && selectedEntry.customerName && (
