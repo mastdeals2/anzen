@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Mail, RefreshCw, Sparkles, DollarSign, FileText, TestTube, Package, Calendar, AlertCircle } from 'lucide-react';
 import type { Email, ParsedEmailData } from '../../types/commandCenter';
@@ -13,6 +13,66 @@ export function EmailListPanel({ onEmailSelect, selectedEmailId }: EmailListPane
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [parsingEmailId, setParsingEmailId] = useState<string | null>(null);
+
+  const loadEmails = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('crm_email_inbox')
+        .select('*')
+        .eq('is_processed', false)
+        .order('received_date', { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+      setEmails(data || []);
+    } catch (error) {
+      console.error('Error loading emails:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        console.error('Not authenticated');
+        setRefreshing(false);
+        return;
+      }
+
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-gmail-emails`;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`Sync failed: ${response.status}`);
+      }
+
+      await response.json();
+      await loadEmails();
+    } catch (error) {
+      console.error('Error syncing emails:', error);
+      await loadEmails();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadEmails]);
 
   useEffect(() => {
     loadEmails();
@@ -32,37 +92,132 @@ export function EmailListPanel({ onEmailSelect, selectedEmailId }: EmailListPane
       )
       .subscribe();
 
+    // Auto-sync emails every 10 minutes
+    const syncInterval = setInterval(() => {
+      handleRefresh();
+    }, 600000); // 10 minutes
+
     return () => {
       subscription.unsubscribe();
+      clearInterval(syncInterval);
     };
-  }, []);
+  }, [loadEmails, handleRefresh]);
 
-  const loadEmails = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('crm_email_inbox')
-        .select('*')
-        .eq('is_processed', false)
-        .order('received_date', { ascending: false })
-        .limit(50);
+  useEffect(() => {
+    const checkPendingEmail = async () => {
+      const pendingEmail = sessionStorage.getItem('pendingEmailForInquiry');
+      if (pendingEmail) {
+        console.log('[EmailListPanel] Found pending email in sessionStorage');
+        sessionStorage.removeItem('pendingEmailForInquiry');
+        document.body.style.cursor = 'wait';
 
-      if (error) throw error;
-      setEmails(data || []);
-    } catch (error) {
-      console.error('Error loading emails:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+        try {
+          const emailData = JSON.parse(pendingEmail);
+          console.log('[EmailListPanel] Parsed email data:', emailData);
 
-  const handleRefresh = () => {
-    setRefreshing(true);
-    loadEmails();
-  };
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) {
+            console.error('[EmailListPanel] No session found');
+            throw new Error('Not authenticated');
+          }
+
+          // Check if this email was already processed (optional, non-blocking)
+          try {
+            const { data: existingInquiry } = await supabase
+              .from('crm_inquiries')
+              .select('id, inquiry_number, product_name')
+              .eq('mail_subject', emailData.subject)
+              .maybeSingle();
+
+            if (existingInquiry) {
+              const shouldReprocess = confirm(
+                `This email has already been processed as Inquiry #${existingInquiry.inquiry_number} (${existingInquiry.product_name}).\n\nDo you want to reprocess it?`
+              );
+
+              if (!shouldReprocess) {
+                console.log('[EmailListPanel] User declined to reprocess existing inquiry');
+                sessionStorage.removeItem('pendingEmailForCommandCenter');
+                return;
+              }
+              console.log('[EmailListPanel] User confirmed reprocessing existing inquiry');
+            }
+          } catch (error) {
+            console.warn('[EmailListPanel] Could not check for duplicates (continuing anyway):', error);
+          }
+
+          console.log('[EmailListPanel] Calling parse-pharma-email edge function');
+          const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-pharma-email`;
+
+          console.log('[EmailListPanel] API URL:', apiUrl);
+          console.log('[EmailListPanel] Request body:', {
+            emailSubject: emailData.subject,
+            emailBody: emailData.body.substring(0, 100) + '...',
+            fromEmail: emailData.fromEmail,
+            fromName: emailData.fromName,
+          });
+
+          const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              emailSubject: emailData.subject,
+              emailBody: emailData.body,
+              fromEmail: emailData.fromEmail,
+              fromName: emailData.fromName,
+            }),
+          });
+
+          console.log('[EmailListPanel] Response status:', response.status);
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[EmailListPanel] Response error:', errorText);
+            throw new Error(`Edge function returned ${response.status}: ${errorText}`);
+          }
+
+          const result = await response.json();
+          console.log('[EmailListPanel] Parse result:', result);
+
+          if (result.success || result.fallbackData) {
+            const mockEmail: Email = {
+              id: 'gmail-' + Date.now(),
+              from_email: emailData.fromEmail,
+              from_name: emailData.fromName,
+              subject: emailData.subject,
+              body: emailData.body,
+              received_date: emailData.date,
+              is_processed: false,
+              is_inquiry: false,
+              parsed_data: null,
+              converted_to_inquiry: null,
+            };
+
+            console.log('[EmailListPanel] Calling onEmailSelect with mock email');
+            onEmailSelect(mockEmail, result.data || result.fallbackData);
+          } else {
+            console.error('[EmailListPanel] Parse failed:', result.error);
+            alert('Failed to parse email from Gmail: ' + result.error);
+          }
+        } catch (error) {
+          console.error('[EmailListPanel] Error processing pending email:', error);
+          alert(`Failed to process email: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+          document.body.style.cursor = 'default';
+        }
+      } else {
+        console.log('[EmailListPanel] No pending email found in sessionStorage');
+      }
+    };
+
+    checkPendingEmail();
+  }, [onEmailSelect]);
 
   const handleEmailClick = async (email: Email) => {
     setParsingEmailId(email.id);
+    document.body.style.cursor = 'wait';
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -101,6 +256,7 @@ export function EmailListPanel({ onEmailSelect, selectedEmailId }: EmailListPane
       alert('Failed to parse email. Please try again.');
     } finally {
       setParsingEmailId(null);
+      document.body.style.cursor = 'default';
     }
   };
 

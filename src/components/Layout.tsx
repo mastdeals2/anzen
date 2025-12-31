@@ -23,6 +23,9 @@ import {
   FileText,
   ClipboardCheck,
   TrendingUp,
+  RotateCcw,
+  AlertTriangle,
+  ClipboardList,
 } from 'lucide-react';
 import logo from '../assets/Untitled-1.svg';
 
@@ -37,7 +40,7 @@ export function Layout({ children }: LayoutProps) {
   const { currentPage, setCurrentPage, sidebarCollapsed, setSidebarCollapsed } = useNavigation();
 
   // Auto-collapse sidebar for specific pages
-  const autoCollapsiblePages = ['crm', 'command-center'];
+  const autoCollapsiblePages = ['crm', 'command-center', 'finance'];
   const shouldAutoCollapse = autoCollapsiblePages.includes(currentPage);
 
   // Automatically collapse sidebar when entering CRM or Command Center
@@ -56,7 +59,9 @@ export function Layout({ children }: LayoutProps) {
     { id: 'sales-orders', label: 'Sales Orders', icon: FileText, roles: ['admin', 'accounts', 'sales'] },
     { id: 'delivery-challan', label: t('nav.deliveryChallan'), icon: Truck, roles: ['admin', 'accounts', 'sales', 'warehouse'] },
     { id: 'sales', label: t('nav.sales'), icon: ShoppingCart, roles: ['admin', 'accounts', 'sales'] },
+    { id: 'purchase-orders', label: 'Purchase Orders', icon: ClipboardList, roles: ['admin', 'warehouse', 'accounts'] },
     { id: 'import-requirements', label: 'Import Requirements', icon: TrendingUp, roles: ['admin', 'warehouse', 'sales'] },
+    { id: 'import-containers', label: 'Import Containers', icon: Package, roles: ['admin', 'warehouse', 'accounts'] },
     { id: 'finance', label: t('nav.finance'), icon: DollarSign, roles: ['admin', 'accounts'] },
     { id: 'crm', label: t('nav.crm'), icon: UserCircle, roles: ['admin', 'sales'] },
     { id: 'command-center', label: 'Command Center', icon: Zap, roles: ['admin', 'sales'] },
@@ -75,12 +80,12 @@ export function Layout({ children }: LayoutProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div
-        className={`fixed inset-0 bg-gray-900 bg-opacity-50 z-20 lg:hidden transition-opacity ${
-          sidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
-        }`}
-        onClick={() => setSidebarOpen(false)}
-      />
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-gray-900 bg-opacity-50 z-20 lg:hidden transition-opacity"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
 
       <aside
         className={`fixed top-0 left-0 z-30 h-full bg-white border-r border-gray-200 transform transition-all lg:translate-x-0 ${
@@ -116,16 +121,22 @@ export function Layout({ children }: LayoutProps) {
                   setCurrentPage(item.id);
                   setSidebarOpen(false);
                 }}
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition ${
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition relative group ${
                   isActive
                     ? 'bg-blue-50 text-blue-600'
                     : 'text-gray-700 hover:bg-gray-50'
                 } ${sidebarCollapsed && shouldAutoCollapse ? 'justify-center' : ''}`}
-                title={sidebarCollapsed && shouldAutoCollapse ? item.label : undefined}
+                title={sidebarCollapsed && shouldAutoCollapse ? item.label : ''}
               >
                 <Icon className="w-5 h-5 flex-shrink-0" />
                 {!(sidebarCollapsed && shouldAutoCollapse) && (
                   <span className="font-medium text-sm">{item.label}</span>
+                )}
+                {/* Enhanced tooltip for collapsed state */}
+                {sidebarCollapsed && shouldAutoCollapse && (
+                  <span className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                    {item.label}
+                  </span>
                 )}
               </button>
             );

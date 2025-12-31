@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Plus, Trash2, Upload, X, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, X, FileText } from 'lucide-react';
 
 interface Customer {
   id: string;
@@ -84,6 +84,7 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
     so_date: new Date().toISOString().split('T')[0],
     expected_delivery_date: '',
     notes: '',
+    currency: 'IDR',
   });
 
   const [poFile, setPoFile] = useState<File | null>(null);
@@ -116,6 +117,7 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
         so_date: existingOrder.so_date,
         expected_delivery_date: existingOrder.expected_delivery_date || '',
         notes: existingOrder.notes || '',
+        currency: (existingOrder as any).currency || 'IDR',
       });
 
       if (existingOrder.sales_order_items && existingOrder.sales_order_items.length > 0) {
@@ -279,30 +281,47 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
       alert('At least one item is required');
       return;
     }
-    setItems(items.filter((_, i) => i !== index));
+    console.log('Removing item at index:', index, 'Current items count:', items.length);
+    const newItems = items.filter((_, i) => i !== index);
+    console.log('New items count after removal:', newItems.length);
+    setItems(newItems);
   };
 
   const uploadPoFile = async () => {
     if (!poFile) return null;
 
     try {
+      console.log('Starting file upload:', poFile.name);
       const fileExt = poFile.name.split('.').pop();
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
       const filePath = `customer-po/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('sales-order-documents')
-        .upload(filePath, poFile);
+      console.log('Uploading to path:', filePath);
 
-      if (uploadError) throw uploadError;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('sales-order-documents')
+        .upload(filePath, poFile, {
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        throw uploadError;
+      }
+
+      console.log('File uploaded successfully:', uploadData);
 
       const { data: { publicUrl } } = supabase.storage
         .from('sales-order-documents')
         .getPublicUrl(filePath);
 
+      console.log('Public URL generated:', publicUrl);
+
       return publicUrl;
     } catch (error: any) {
-      console.error('Error uploading file:', error.message);
+      console.error('Error uploading file:', error);
+      alert(`Failed to upload PO file: ${error.message || 'Unknown error'}`);
       throw error;
     }
   };
@@ -325,12 +344,33 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
       return;
     }
 
+    // Check if editing an approved/reserved order
+    const wasApproved = existingOrder && ['approved', 'stock_reserved', 'shortage', 'pending_approval'].includes(existingOrder.status);
+
+    if (wasApproved && existingOrder) {
+      const confirmed = confirm(
+        '⚠️ Warning: This order has been approved or is awaiting approval.\n\n' +
+        'Editing will:\n' +
+        '• Release existing stock reservations\n' +
+        '• Require re-approval from admin\n' +
+        '• Reset status to "Pending Approval"\n\n' +
+        'Do you want to continue?'
+      );
+
+      if (!confirmed) return;
+    }
+
     try {
       setLoading(true);
 
       let poFileUrl = existingOrder?.customer_po_file_url || null;
       if (poFile) {
+        console.log('Uploading PO file...');
         poFileUrl = await uploadPoFile();
+        console.log('PO file URL:', poFileUrl);
+        if (!poFileUrl) {
+          throw new Error('File upload returned no URL');
+        }
       }
 
       const subtotal = items.reduce((sum, item) => sum + (item.quantity * item.unit_price - item.discount_amount), 0);
@@ -338,6 +378,30 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
       const total = items.reduce((sum, item) => sum + item.line_total, 0);
 
       if (existingOrder) {
+        // Release stock reservations if order was approved
+        if (wasApproved) {
+          console.log('Releasing stock reservations for order:', existingOrder.id);
+          const { error: releaseError } = await supabase.rpc('fn_release_reservation_by_so_id', {
+            p_so_id: existingOrder.id,
+            p_released_by: user?.id
+          });
+
+          if (releaseError) {
+            console.error('Error releasing reservations:', releaseError);
+            // Continue anyway - we'll show a warning but allow the update
+          }
+        }
+
+        // Determine new status
+        let newStatus: string;
+        if (wasApproved || submitForApproval) {
+          newStatus = 'pending_approval'; // Always require re-approval if it was approved before
+        } else {
+          newStatus = 'draft';
+        }
+
+        console.log('Updating order. Items count:', items.length);
+
         // Update existing order
         const { error: soError } = await supabase
           .from('sales_orders')
@@ -347,9 +411,10 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
             customer_po_date: formData.customer_po_date,
             customer_po_file_url: poFileUrl,
             so_date: formData.so_date,
+            currency: formData.currency,
             expected_delivery_date: formData.expected_delivery_date || null,
             notes: formData.notes || null,
-            status: submitForApproval ? 'pending_approval' : 'draft',
+            status: newStatus,
             subtotal_amount: subtotal,
             tax_amount: tax,
             total_amount: total,
@@ -382,13 +447,33 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
           notes: item.notes || null,
         }));
 
-        const { error: itemsError } = await supabase
+        console.log('Inserting items. Count:', itemsToInsert.length);
+
+        const { data: insertedItems, error: itemsError } = await supabase
           .from('sales_order_items')
-          .insert(itemsToInsert);
+          .insert(itemsToInsert)
+          .select();
 
         if (itemsError) throw itemsError;
 
-        alert(`Sales order updated successfully${submitForApproval ? ' and submitted for approval' : ''}!`);
+        console.log('Items inserted successfully. Count:', insertedItems?.length || 0);
+
+        // Verify all items were inserted
+        if (insertedItems && insertedItems.length !== items.length) {
+          console.error('WARNING: Item count mismatch!', {
+            expected: items.length,
+            inserted: insertedItems.length
+          });
+          alert(`⚠️ Warning: Expected ${items.length} items but only ${insertedItems.length} were saved. Please verify the order.`);
+        }
+
+        const statusMessage = wasApproved
+          ? ' and submitted for re-approval. Stock reservations have been released.'
+          : submitForApproval
+            ? ' and submitted for approval'
+            : '';
+
+        alert(`Sales order updated successfully${statusMessage}!`);
       } else {
         // Create new order
         const { data: soData, error: soError } = await supabase
@@ -400,6 +485,7 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
             customer_po_date: formData.customer_po_date,
             customer_po_file_url: poFileUrl,
             so_date: formData.so_date,
+            currency: formData.currency,
             expected_delivery_date: formData.expected_delivery_date || null,
             notes: formData.notes || null,
             status: submitForApproval ? 'pending_approval' : 'draft',
@@ -461,6 +547,11 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
   const totalTax = items.reduce((sum, item) => sum + item.tax_amount, 0);
   const grandTotal = items.reduce((sum, item) => sum + item.line_total, 0);
 
+  const formatCurrency = (amount: number) => {
+    const formatted = amount.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    return formData.currency === 'USD' ? `$ ${formatted}` : `Rp ${formatted}`;
+  };
+
   return (
     <form className="space-y-6">
       <div className="grid grid-cols-2 gap-4">
@@ -514,6 +605,19 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
         </div>
 
         <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Currency *</label>
+          <select
+            value={formData.currency}
+            onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+            className="w-full border rounded-lg px-3 py-2"
+            required
+          >
+            <option value="IDR">IDR (Rp)</option>
+            <option value="USD">USD ($)</option>
+          </select>
+        </div>
+
+        <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">{t('salesOrders.expectedDeliveryDate')}</label>
           <input
             type="date"
@@ -525,6 +629,22 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">{t('salesOrders.uploadPo')}</label>
+          {existingOrder?.customer_po_file_url && !poFile && (
+            <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-blue-600" />
+                <span className="text-sm text-blue-700">PO file already uploaded</span>
+              </div>
+              <a
+                href={existingOrder.customer_po_file_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-blue-600 hover:text-blue-800 underline"
+              >
+                View
+              </a>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <input
               type="file"
@@ -537,11 +657,18 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
                 type="button"
                 onClick={() => setPoFile(null)}
                 className="text-red-600 hover:text-red-800"
+                title="Remove selected file"
               >
                 <X className="w-5 h-5" />
               </button>
             )}
           </div>
+          {poFile && (
+            <p className="mt-1 text-sm text-green-600 flex items-center gap-1">
+              <FileText className="w-4 h-4" />
+              Ready to upload: {poFile.name}
+            </p>
+          )}
         </div>
       </div>
 
@@ -719,7 +846,7 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
                 <div className="flex items-end justify-between">
                   <div>
                     <label className="text-xs text-gray-600">{t('salesOrders.lineTotal')}</label>
-                    <div className="text-sm font-medium">Rp {item.line_total.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
+                    <div className="text-sm font-medium">{formatCurrency(item.line_total)}</div>
                   </div>
                   <button
                     type="button"
@@ -739,15 +866,15 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
             <span>{t('sales.subtotal')}:</span>
-            <span className="font-medium">Rp {subtotal.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+            <span className="font-medium">{formatCurrency(subtotal)}</span>
           </div>
           <div className="flex justify-between text-sm">
             <span>{t('sales.tax')}:</span>
-            <span className="font-medium">Rp {totalTax.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+            <span className="font-medium">{formatCurrency(totalTax)}</span>
           </div>
           <div className="flex justify-between text-lg font-bold border-t pt-2">
             <span>{t('salesOrders.grandTotal')}:</span>
-            <span>Rp {grandTotal.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+            <span>{formatCurrency(grandTotal)}</span>
           </div>
         </div>
       </div>
@@ -761,21 +888,28 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
         >
           {t('common.cancel')}
         </button>
-        <button
-          type="button"
-          onClick={(e) => handleSubmit(e, false)}
-          className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
-          disabled={loading}
-        >
-          {loading ? t('common.loading') : t('salesOrders.saveAsDraft')}
-        </button>
+        {/* Hide Save as Draft button if editing an approved/pending order */}
+        {!(existingOrder && ['approved', 'stock_reserved', 'shortage', 'pending_approval'].includes(existingOrder.status)) && (
+          <button
+            type="button"
+            onClick={(e) => handleSubmit(e, false)}
+            className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+            disabled={loading}
+          >
+            {loading ? t('common.loading') : t('salesOrders.saveAsDraft')}
+          </button>
+        )}
         <button
           type="button"
           onClick={(e) => handleSubmit(e, true)}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           disabled={loading}
         >
-          {loading ? `${t('common.submit')}...` : t('salesOrders.submitForApproval')}
+          {loading
+            ? `${t('common.submit')}...`
+            : existingOrder && ['approved', 'stock_reserved', 'shortage', 'pending_approval'].includes(existingOrder.status)
+              ? 'Submit for Re-Approval'
+              : t('salesOrders.submitForApproval')}
         </button>
       </div>
     </form>

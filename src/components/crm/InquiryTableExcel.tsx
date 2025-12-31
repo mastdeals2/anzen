@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import * as XLSX from 'xlsx';
 import {
   ChevronDown, X, Mail, Phone, FileText, Calendar,
   Flame, ArrowUp, Minus, Send, MessageSquare, CheckSquare,
-  Download, FileSpreadsheet, ArrowUpDown, ArrowDown, Check, XCircle
+  Download, FileSpreadsheet, ArrowUpDown, ArrowDown, Check, XCircle, Plus, ChevronRight, Layers
 } from 'lucide-react';
 import { Modal } from '../Modal';
 import { GmailLikeComposer } from './GmailLikeComposer';
@@ -13,6 +13,36 @@ import { OurSideChips } from './OurSideChips';
 import { PipelineStatusBadge, pipelineStatusOptions } from './PipelineStatusBadge';
 import { LostReasonModal } from './LostReasonModal';
 import { useAuth } from '../../contexts/AuthContext';
+
+interface InquiryItem {
+  id: string;
+  parent_inquiry_id: string;
+  inquiry_number: string;
+  product_name: string;
+  specification?: string | null;
+  quantity: string;
+  make?: string | null;
+  supplier_name?: string | null;
+  supplier_country?: string | null;
+  delivery_date?: string | null;
+  delivery_terms?: string | null;
+  aceerp_no?: string | null;
+  purchase_price?: number | null;
+  purchase_price_currency?: string;
+  offered_price?: number | null;
+  offered_price_currency?: string;
+  our_side_status?: string[];
+  price_sent_at?: string | null;
+  coa_sent_at?: string | null;
+  sample_sent_at?: string | null;
+  agency_letter_sent_at?: string | null;
+  status: string;
+  pipeline_stage: string;
+  document_sent: boolean;
+  document_sent_at?: string | null;
+  remarks?: string | null;
+  notes?: string | null;
+}
 
 interface Inquiry {
   id: string;
@@ -40,6 +70,7 @@ interface Inquiry {
   coa_required?: boolean;
   sample_required?: boolean;
   agency_letter_required?: boolean;
+  others_required?: boolean;
   price_sent_at?: string | null;
   coa_sent_at?: string | null;
   sample_sent_at?: string | null;
@@ -52,6 +83,8 @@ interface Inquiry {
   delivery_date?: string | null;
   delivery_terms?: string | null;
   remarks: string | null;
+  is_multi_product?: boolean;
+  has_items?: boolean;
 }
 
 interface ColumnFilter {
@@ -63,15 +96,16 @@ interface InquiryTableProps {
   inquiries: Inquiry[];
   onRefresh: () => void;
   canManage: boolean;
+  onAddInquiry?: () => void;
 }
 
-export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTableProps) {
+export function InquiryTableExcel({ inquiries, onRefresh, canManage, onAddInquiry }: InquiryTableProps) {
   const { profile } = useAuth();
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [filters, setFilters] = useState<ColumnFilter[]>([]);
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [filteredData, setFilteredData] = useState<Inquiry[]>(inquiries);
-  const [sortConfig, setSortConfig] = useState<{ column: string; direction: 'asc' | 'desc' | null }>({ column: '', direction: null });
+  const [sortConfig, setSortConfig] = useState<{ column: string; direction: 'asc' | 'desc' | null }>({ column: 'inquiry_date', direction: 'desc' });
   const [editingCell, setEditingCell] = useState<{ id: string; field: string } | null>(null);
   const [editValue, setEditValue] = useState('');
   const [emailModalOpen, setEmailModalOpen] = useState(false);
@@ -85,7 +119,42 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
   const [exporting, setExporting] = useState(false);
   const [lostReasonModalOpen, setLostReasonModalOpen] = useState(false);
   const [inquiryToMarkLost, setInquiryToMarkLost] = useState<Inquiry | null>(null);
+  const [offeredPriceModalOpen, setOfferedPriceModalOpen] = useState(false);
+  const [inquiryForOfferedPrice, setInquiryForOfferedPrice] = useState<Inquiry | null>(null);
+  const [offeredPriceInput, setOfferedPriceInput] = useState('');
+  const [editRequirementsModalOpen, setEditRequirementsModalOpen] = useState(false);
+  const [requirementsForm, setRequirementsForm] = useState({
+    price_required: false,
+    coa_required: false,
+    sample_required: false,
+    agency_letter_required: false,
+    others_required: false,
+  });
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [inquiryItems, setInquiryItems] = useState<Map<string, InquiryItem[]>>(new Map());
   const filterRef = useRef<HTMLDivElement>(null);
+
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
+    checkbox: 50,
+    inquiry_number: 120,
+    inquiry_date: 120,
+    product_name: 200,
+    specification: 200,
+    quantity: 100,
+    supplier_name: 150,
+    company_name: 180,
+    mail_subject: 200,
+    aceerp_no: 120,
+    status: 130,
+    pipeline_status: 130,
+    our_side: 130,
+    purchase_price: 100,
+    offered_price: 100,
+    delivery_date: 120,
+    priority: 100,
+    remarks: 200,
+  });
+  const [resizing, setResizing] = useState<{ column: string; startX: number; startWidth: number } | null>(null);
 
   const statusOptions = [
     { value: 'new', label: 'New' },
@@ -119,6 +188,68 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!resizing) return;
+      const delta = e.clientX - resizing.startX;
+      const newWidth = Math.max(50, resizing.startWidth + delta);
+      setColumnWidths(prev => ({ ...prev, [resizing.column]: newWidth }));
+    };
+
+    const handleMouseUp = () => {
+      setResizing(null);
+    };
+
+    if (resizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [resizing]);
+
+  const handleResizeStart = (column: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizing({
+      column,
+      startX: e.clientX,
+      startWidth: columnWidths[column] || 150,
+    });
+  };
+
+  const ResizableHeader = ({
+    column,
+    label,
+    sortable = true,
+    className = ''
+  }: {
+    column: string;
+    label: string;
+    sortable?: boolean;
+    className?: string;
+  }) => (
+    <th
+      style={{ width: columnWidths[column], minWidth: columnWidths[column] }}
+      className={`relative px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 ${sortable ? 'cursor-pointer hover:bg-gray-100 select-none' : ''} ${className}`}
+      onClick={sortable ? () => handleSort(column) : undefined}
+    >
+      <div className="flex items-center gap-1">
+        <span className="truncate">{label}</span>
+        {sortable && getSortIcon(column)}
+      </div>
+      <div
+        className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-400 group"
+        onMouseDown={(e) => handleResizeStart(column, e)}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="absolute top-0 right-0 w-1 h-full bg-transparent group-hover:bg-blue-400" />
+      </div>
+    </th>
+  );
 
   const applyFiltersAndSort = () => {
     let result = [...inquiries];
@@ -203,7 +334,22 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
         'Supplier': inquiry.supplier_name || '-',
         'Country': inquiry.supplier_country || '-',
         'Company': inquiry.company_name,
-        'Status': statusOptions.find(s => s.value === inquiry.status)?.label || inquiry.status,
+        'Mail Subject': inquiry.mail_subject || '-',
+        'ACE ERP#': inquiry.aceerp_no || '-',
+        'Pipeline': pipelineStatusOptions.find(p => p.value === inquiry.pipeline_status)?.label || '-',
+        'Price Needed': inquiry.price_required ? 'Yes' : 'No',
+        'COA Needed': inquiry.coa_required ? 'Yes' : 'No',
+        'Sample Needed': inquiry.sample_required ? 'Yes' : 'No',
+        'Agency Letter Needed': inquiry.agency_letter_required ? 'Yes' : 'No',
+        'Others Needed': inquiry.others_required ? 'Yes' : 'No',
+        'Price Sent': inquiry.price_sent_at ? 'Yes' : 'No',
+        'COA Sent': inquiry.coa_sent_at ? 'Yes' : 'No',
+        'Sample Sent': inquiry.sample_sent_at ? 'Yes' : 'No',
+        'Agency Letter Sent': inquiry.agency_letter_sent_at ? 'Yes' : 'No',
+        'Purchase Price': inquiry.purchase_price ? `${inquiry.purchase_price} ${inquiry.purchase_price_currency || 'USD'}` : '-',
+        'Offered Price': inquiry.offered_price ? `${inquiry.offered_price} ${inquiry.offered_price_currency || 'USD'}` : '-',
+        'Delivery Date': inquiry.delivery_date ? new Date(inquiry.delivery_date).toLocaleDateString('en-GB') : '-',
+        'Delivery Terms': inquiry.delivery_terms || '-',
         'Priority': priorityOptions.find(p => p.value === inquiry.priority)?.label || inquiry.priority,
         'Remarks': inquiry.remarks || '-',
       }));
@@ -212,7 +358,7 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
 
       // Set column widths
       ws['!cols'] = [
-        { wch: 12 },  // No.
+        { wch: 15 },  // No.
         { wch: 12 },  // Date
         { wch: 30 },  // Product
         { wch: 20 },  // Specification
@@ -220,7 +366,21 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
         { wch: 20 },  // Supplier
         { wch: 12 },  // Country
         { wch: 25 },  // Company
-        { wch: 15 },  // Status
+        { wch: 30 },  // Mail Subject
+        { wch: 12 },  // ACE ERP#
+        { wch: 15 },  // Pipeline
+        { wch: 13 },  // Price Needed
+        { wch: 12 },  // COA Needed
+        { wch: 15 },  // Sample Needed
+        { wch: 20 },  // Agency Letter Needed
+        { wch: 12 },  // Price Sent
+        { wch: 11 },  // COA Sent
+        { wch: 13 },  // Sample Sent
+        { wch: 19 },  // Agency Letter Sent
+        { wch: 18 },  // Purchase Price
+        { wch: 18 },  // Offered Price
+        { wch: 15 },  // Delivery Date
+        { wch: 18 },  // Delivery Terms
         { wch: 10 },  // Priority
         { wch: 30 },  // Remarks
       ];
@@ -257,7 +417,22 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
         'Supplier': inquiry.supplier_name || '-',
         'Country': inquiry.supplier_country || '-',
         'Company': inquiry.company_name,
-        'Status': statusOptions.find(s => s.value === inquiry.status)?.label || inquiry.status,
+        'Mail Subject': inquiry.mail_subject || '-',
+        'ACE ERP#': inquiry.aceerp_no || '-',
+        'Pipeline': pipelineStatusOptions.find(p => p.value === inquiry.pipeline_status)?.label || '-',
+        'Price Needed': inquiry.price_required ? 'Yes' : 'No',
+        'COA Needed': inquiry.coa_required ? 'Yes' : 'No',
+        'Sample Needed': inquiry.sample_required ? 'Yes' : 'No',
+        'Agency Letter Needed': inquiry.agency_letter_required ? 'Yes' : 'No',
+        'Others Needed': inquiry.others_required ? 'Yes' : 'No',
+        'Price Sent': inquiry.price_sent_at ? 'Yes' : 'No',
+        'COA Sent': inquiry.coa_sent_at ? 'Yes' : 'No',
+        'Sample Sent': inquiry.sample_sent_at ? 'Yes' : 'No',
+        'Agency Letter Sent': inquiry.agency_letter_sent_at ? 'Yes' : 'No',
+        'Purchase Price': inquiry.purchase_price ? `${inquiry.purchase_price} ${inquiry.purchase_price_currency || 'USD'}` : '-',
+        'Offered Price': inquiry.offered_price ? `${inquiry.offered_price} ${inquiry.offered_price_currency || 'USD'}` : '-',
+        'Delivery Date': inquiry.delivery_date ? new Date(inquiry.delivery_date).toLocaleDateString('en-GB') : '-',
+        'Delivery Terms': inquiry.delivery_terms || '-',
         'Priority': priorityOptions.find(p => p.value === inquiry.priority)?.label || inquiry.priority,
         'Remarks': inquiry.remarks || '-',
       }));
@@ -284,6 +459,160 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
     } finally {
       setExporting(false);
     }
+  };
+
+  const downloadImportTemplate = () => {
+    const templateData = [{
+      'Date': '02-12-2024',
+      'Product': 'Example Product Name',
+      'Specification': 'BP / USP / EP',
+      'Qty': '500 KG',
+      'Supplier': 'Manufacturer Name',
+      'Country': 'Japan',
+      'Company': 'Customer Company Name',
+      'Mail Subject': 'Inquiry for Product',
+      'ACE ERP#': 'ACE-123',
+      'Price Needed': 'Yes',
+      'COA Needed': 'Yes',
+      'Sample Needed': 'No',
+      'Agency Letter Needed': 'No',
+      'Others Needed': 'No',
+      'Purchase Price': '100',
+      'Purchase Price Currency': 'USD',
+      'Offered Price': '150',
+      'Offered Price Currency': 'USD',
+      'Delivery Date': '2025-12-31',
+      'Delivery Terms': 'FOB Shanghai',
+      'Priority': 'Medium',
+      'Remarks': 'Additional notes',
+    }];
+
+    const ws = XLSX.utils.json_to_sheet(templateData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Import Template');
+
+    XLSX.writeFile(wb, 'CRM-Import-Template.xlsx');
+    alert('Template downloaded! Fill in your data and use the Import button to upload.');
+  };
+
+  const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+        if (jsonData.length === 0) {
+          alert('No data found in the file');
+          return;
+        }
+
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Not authenticated');
+
+        const parseDate = (dateStr: any) => {
+          if (!dateStr) return new Date().toISOString().split('T')[0];
+
+          // Handle Excel serial date numbers (e.g., 45261)
+          if (typeof dateStr === 'number') {
+            // Excel epoch starts on January 1, 1900 (but Excel incorrectly treats 1900 as a leap year)
+            const excelEpoch = new Date(1899, 11, 30); // December 30, 1899
+            const date = new Date(excelEpoch.getTime() + dateStr * 86400000);
+            const year = date.getFullYear();
+            const month = (date.getMonth() + 1).toString().padStart(2, '0');
+            const day = date.getDate().toString().padStart(2, '0');
+            return `${year}-${month}-${day}`;
+          }
+
+          // Handle string formats
+          const str = dateStr.toString().trim();
+
+          // D/M/YY or DD/MM/YY format (e.g., 4/10/25, 10/11/25)
+          const twoDigitYear = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+          if (twoDigitYear) {
+            let [, day, month, year] = twoDigitYear;
+            // Convert 2-digit year to 4-digit (00-29 = 2000s, 30-99 = 1900s)
+            const fullYear = parseInt(year) < 30 ? `20${year}` : `19${year}`;
+            return `${fullYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+          }
+
+          // DD-MM-YYYY format
+          const ddmmyyyy1 = str.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+          if (ddmmyyyy1) {
+            const [, day, month, year] = ddmmyyyy1;
+            return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+          }
+
+          // DD/MM/YYYY format
+          const ddmmyyyy2 = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+          if (ddmmyyyy2) {
+            const [, day, month, year] = ddmmyyyy2;
+            return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+          }
+
+          // YYYY-MM-DD format
+          const yyyymmdd = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+          if (yyyymmdd) {
+            const [, year, month, day] = yyyymmdd;
+            return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+          }
+
+          return new Date().toISOString().split('T')[0];
+        };
+
+        const inquiriesToInsert = jsonData.map((row: any) => ({
+          product_name: row['Product'] || '',
+          specification: row['Specification'] || null,
+          quantity: row['Qty'] || '',
+          supplier_name: row['Supplier'] || null,
+          supplier_country: row['Country'] || null,
+          company_name: row['Company'] || '',
+          mail_subject: row['Mail Subject'] || null,
+          aceerp_no: row['ACE ERP#'] || null,
+          price_required: (row['Price Needed'] || '').toLowerCase() === 'yes',
+          coa_required: (row['COA Needed'] || '').toLowerCase() === 'yes',
+          sample_required: (row['Sample Needed'] || '').toLowerCase() === 'yes',
+          agency_letter_required: (row['Agency Letter Needed'] || '').toLowerCase() === 'yes',
+          others_required: (row['Others Needed'] || '').toLowerCase() === 'yes',
+          purchase_price: row['Purchase Price'] ? parseFloat(row['Purchase Price']) : null,
+          purchase_price_currency: row['Purchase Price Currency'] || 'USD',
+          offered_price: row['Offered Price'] ? parseFloat(row['Offered Price']) : null,
+          offered_price_currency: row['Offered Price Currency'] || 'USD',
+          delivery_date: row['Delivery Date'] || null,
+          delivery_terms: row['Delivery Terms'] || null,
+          priority: (row['Priority'] || 'medium').toLowerCase(),
+          remarks: row['Remarks'] || null,
+          inquiry_date: parseDate(row['Date']),
+          pipeline_status: 'new',
+          status: 'new',
+          inquiry_source: 'other',
+          assigned_to: user.id,
+          created_by: user.id,
+        }));
+
+        const { error } = await supabase
+          .from('crm_inquiries')
+          .insert(inquiriesToInsert);
+
+        if (error) throw error;
+
+        alert(`Successfully imported ${inquiriesToInsert.length} inquiries!`);
+        onRefresh();
+
+        event.target.value = '';
+      } catch (error) {
+        console.error('Import error:', error);
+        alert('Failed to import data. Please check the file format and try again.');
+        event.target.value = '';
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
   };
 
   const toggleFilter = (column: string, value: string) => {
@@ -322,8 +651,7 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
       if (newSet.has(id)) {
         newSet.delete(id);
       } else {
-        newSet.clear(); // Only allow single selection
-        newSet.add(id);
+        newSet.add(id); // Allow multiple selections
       }
       return newSet;
     });
@@ -335,6 +663,36 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
     } else {
       setSelectedRows(new Set(filteredData.map(i => i.id)));
     }
+  };
+
+  const toggleRowExpansion = async (inquiryId: string) => {
+    const newExpanded = new Set(expandedRows);
+
+    if (newExpanded.has(inquiryId)) {
+      newExpanded.delete(inquiryId);
+    } else {
+      newExpanded.add(inquiryId);
+
+      if (!inquiryItems.has(inquiryId)) {
+        try {
+          const { data, error } = await supabase
+            .from('crm_inquiry_items')
+            .select('*')
+            .eq('parent_inquiry_id', inquiryId)
+            .order('inquiry_number', { ascending: true });
+
+          if (error) throw error;
+
+          const newItems = new Map(inquiryItems);
+          newItems.set(inquiryId, data || []);
+          setInquiryItems(newItems);
+        } catch (error) {
+          console.error('Error fetching inquiry items:', error);
+        }
+      }
+    }
+
+    setExpandedRows(newExpanded);
   };
 
   const startEditing = (inquiry: Inquiry, field: keyof Inquiry) => {
@@ -409,7 +767,39 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
     }
   };
 
-  const markRequirementSent = async (inquiry: Inquiry, requirementType: 'price' | 'coa' | 'sample' | 'agency_letter') => {
+  const markRequirementSent = async (inquiry: Inquiry, requirementType: 'price' | 'coa' | 'sample' | 'agency_letter' | 'others') => {
+    const sentAtField = `${requirementType}_sent_at` as keyof Inquiry;
+    const isSent = inquiry[sentAtField];
+
+    if (isSent) {
+      if (!confirm(`Are you sure you want to unmark ${requirementType.toUpperCase()} as sent?`)) {
+        return;
+      }
+
+      try {
+        const updateData = { [sentAtField]: null };
+        const { error } = await supabase
+          .from('crm_inquiries')
+          .update(updateData)
+          .eq('id', inquiry.id);
+
+        if (error) throw error;
+        onRefresh();
+        alert(`${requirementType.toUpperCase()} unmarked!`);
+      } catch (error) {
+        console.error('Error unmarking requirement:', error);
+        alert('Failed to unmark. Please try again.');
+      }
+      return;
+    }
+
+    if (requirementType === 'price') {
+      setInquiryForOfferedPrice(inquiry);
+      setOfferedPriceInput(inquiry.offered_price?.toString() || '');
+      setOfferedPriceModalOpen(true);
+      return;
+    }
+
     try {
       const { error } = await supabase.rpc('mark_requirement_sent', {
         inquiry_id: inquiry.id,
@@ -422,6 +812,37 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
     } catch (error) {
       console.error('Error marking requirement as sent:', error);
       alert('Failed to mark as sent. Please try again.');
+    }
+  };
+
+  const saveOfferedPriceAndMarkSent = async () => {
+    if (!inquiryForOfferedPrice) return;
+
+    const price = offeredPriceInput.trim() ? parseFloat(offeredPriceInput) : null;
+
+    try {
+      const { error: updateError } = await supabase
+        .from('crm_inquiries')
+        .update({ offered_price: price })
+        .eq('id', inquiryForOfferedPrice.id);
+
+      if (updateError) throw updateError;
+
+      const { error: markError } = await supabase.rpc('mark_requirement_sent', {
+        inquiry_id: inquiryForOfferedPrice.id,
+        requirement_type: 'price'
+      });
+
+      if (markError) throw markError;
+
+      setOfferedPriceModalOpen(false);
+      setInquiryForOfferedPrice(null);
+      setOfferedPriceInput('');
+      onRefresh();
+      alert('Price marked as sent with offered price updated!');
+    } catch (error) {
+      console.error('Error saving offered price and marking sent:', error);
+      alert('Failed to save. Please try again.');
     }
   };
 
@@ -472,6 +893,32 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
     }
   };
 
+  const handleDeleteSelected = async () => {
+    if (selectedRows.size === 0) return;
+
+    const count = selectedRows.size;
+    if (!confirm(`Are you sure you want to delete ${count} selected ${count === 1 ? 'inquiry' : 'inquiries'}? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const idsToDelete = Array.from(selectedRows);
+      const { error } = await supabase
+        .from('crm_inquiries')
+        .delete()
+        .in('id', idsToDelete);
+
+      if (error) throw error;
+
+      setSelectedRows(new Set());
+      alert(`Successfully deleted ${count} ${count === 1 ? 'inquiry' : 'inquiries'}`);
+      onRefresh();
+    } catch (error) {
+      console.error('Error deleting inquiries:', error);
+      alert('Failed to delete inquiries. Please try again.');
+    }
+  };
+
   const handleScheduleFollowUp = () => {
     setFollowUpModalOpen(true);
   };
@@ -505,31 +952,103 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
     }
   };
 
+  const handleEditRequirements = () => {
+    const selectedInquiry = filteredData.find(i => selectedRows.has(i.id));
+    if (!selectedInquiry) return;
+
+    setRequirementsForm({
+      price_required: selectedInquiry.price_required ?? false,
+      coa_required: selectedInquiry.coa_required ?? false,
+      sample_required: selectedInquiry.sample_required ?? false,
+      agency_letter_required: selectedInquiry.agency_letter_required ?? false,
+      others_required: selectedInquiry.others_required ?? false,
+    });
+    setEditRequirementsModalOpen(true);
+  };
+
+  const saveRequirements = async () => {
+    const selectedInquiry = filteredData.find(i => selectedRows.has(i.id));
+    if (!selectedInquiry) return;
+
+    try {
+      const { error } = await supabase
+        .from('crm_inquiries')
+        .update(requirementsForm)
+        .eq('id', selectedInquiry.id);
+
+      if (error) throw error;
+
+      setEditRequirementsModalOpen(false);
+      alert('Customer requirements updated successfully!');
+      onRefresh();
+    } catch (error) {
+      console.error('Error updating requirements:', error);
+      alert('Failed to update requirements. Please try again.');
+    }
+  };
+
   const selectedInquiry = filteredData.find(i => selectedRows.has(i.id));
 
   return (
     <div className="space-y-4">
-      {/* Export Buttons */}
+      {/* Export/Import Buttons */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <button
             onClick={exportToExcel}
             disabled={exporting || filteredData.length === 0}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
             title="Export to Excel (.xlsx)"
           >
-            <FileSpreadsheet className="w-4 h-4" />
-            {exporting ? 'Exporting...' : 'Export to Excel'}
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            {exporting ? 'Exporting...' : 'Export Excel'}
           </button>
           <button
             onClick={exportToCSV}
             disabled={exporting || filteredData.length === 0}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
             title="Export to CSV for Google Sheets"
           >
-            <Download className="w-4 h-4" />
-            {exporting ? 'Exporting...' : 'Export to CSV'}
+            <Download className="w-3.5 h-3.5" />
+            {exporting ? 'Exporting...' : 'Export CSV'}
           </button>
+
+          {canManage && (
+            <>
+              <div className="w-px h-8 bg-gray-300 mx-2" />
+              <button
+                onClick={downloadImportTemplate}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
+                title="Download Excel template for bulk import"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Download Template
+              </button>
+              <label className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition cursor-pointer">
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                Import Excel
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={handleImportFile}
+                  className="hidden"
+                />
+              </label>
+              {onAddInquiry && (
+                <>
+                  <div className="w-px h-8 bg-gray-300 mx-2" />
+                  <button
+                    onClick={onAddInquiry}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Inquiry
+                  </button>
+                </>
+              )}
+            </>
+          )}
+
           <div className="text-sm text-gray-600 ml-2">
             {filteredData.length} {filteredData.length === 1 ? 'inquiry' : 'inquiries'}
             {filters.length > 0 && ' (filtered)'}
@@ -549,45 +1068,61 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
             <div className="flex items-center gap-2">
               <button
                 onClick={handleSendQuote}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition"
               >
-                <Send className="w-4 h-4" />
-                Send Price Quote
+                <Send className="w-3.5 h-3.5" />
+                Send Price
               </button>
               <button
                 onClick={handleSendCOAMSDS}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-md hover:bg-green-100 transition"
               >
-                <FileText className="w-4 h-4" />
+                <FileText className="w-3.5 h-3.5" />
                 Send COA/MSDS
               </button>
               <button
                 onClick={handleLogCall}
-                className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
               >
-                <Phone className="w-4 h-4" />
+                <Phone className="w-3.5 h-3.5" />
                 Log Call
               </button>
               <button
                 onClick={handleScheduleFollowUp}
-                className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition text-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
               >
-                <Calendar className="w-4 h-4" />
+                <Calendar className="w-3.5 h-3.5" />
                 Schedule Follow-up
               </button>
               <button
                 onClick={() => setCreateTaskModalOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
               >
-                <CheckSquare className="w-4 h-4" />
+                <CheckSquare className="w-3.5 h-3.5" />
                 Create Task
               </button>
               <button
+                onClick={handleEditRequirements}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded-md hover:bg-purple-100 transition"
+                title="Edit Customer Requirements"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                Edit Requirements
+              </button>
+              <button
+                onClick={handleDeleteSelected}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 transition"
+                title="Delete Selected"
+              >
+                <X className="w-3.5 h-3.5" />
+                Delete
+              </button>
+              <button
                 onClick={() => setSelectedRows(new Set())}
-                className="p-2 text-gray-600 hover:bg-gray-200 rounded-lg transition"
+                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition"
                 title="Deselect"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
@@ -596,7 +1131,7 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
 
       {/* Excel-like Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden border border-gray-200">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
           <table className="w-full text-sm border-collapse">
             <thead className="bg-gray-50">
               <tr className="border-b border-gray-300">
@@ -609,71 +1144,17 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                   />
                 </th>
 
-                {/* Inquiry Number - Sortable */}
-                <th
-                  onClick={() => handleSort('inquiry_number')}
-                  className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
-                >
-                  <div className="flex items-center gap-1">
-                    <span>No.</span>
-                    {getSortIcon('inquiry_number')}
-                  </div>
-                </th>
+                <ResizableHeader column="inquiry_number" label="No." className="whitespace-nowrap" />
 
-                {/* Date - Sortable */}
-                <th
-                  onClick={() => handleSort('inquiry_date')}
-                  className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
-                >
-                  <div className="flex items-center gap-1">
-                    <span>Date</span>
-                    {getSortIcon('inquiry_date')}
-                  </div>
-                </th>
+                <ResizableHeader column="inquiry_date" label="Date" className="whitespace-nowrap" />
 
-                {/* Product - Sortable */}
-                <th
-                  onClick={() => handleSort('product_name')}
-                  className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 min-w-[200px] cursor-pointer hover:bg-gray-100 select-none"
-                >
-                  <div className="flex items-center gap-1">
-                    <span>Product</span>
-                    {getSortIcon('product_name')}
-                  </div>
-                </th>
+                <ResizableHeader column="product_name" label="Product" />
 
-                {/* Specification - Sortable */}
-                <th
-                  onClick={() => handleSort('specification')}
-                  className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 min-w-[150px] cursor-pointer hover:bg-gray-100 select-none"
-                >
-                  <div className="flex items-center gap-1">
-                    <span>Specification</span>
-                    {getSortIcon('specification')}
-                  </div>
-                </th>
+                <ResizableHeader column="specification" label="Specification" />
 
-                {/* Quantity - Sortable */}
-                <th
-                  onClick={() => handleSort('quantity')}
-                  className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 cursor-pointer hover:bg-gray-100 select-none"
-                >
-                  <div className="flex items-center gap-1">
-                    <span>Qty</span>
-                    {getSortIcon('quantity')}
-                  </div>
-                </th>
+                <ResizableHeader column="quantity" label="Qty" />
 
-                {/* Supplier - Sortable */}
-                <th
-                  onClick={() => handleSort('supplier_name')}
-                  className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 min-w-[150px] cursor-pointer hover:bg-gray-100 select-none"
-                >
-                  <div className="flex items-center gap-1">
-                    <span>Supplier</span>
-                    {getSortIcon('supplier_name')}
-                  </div>
-                </th>
+                <ResizableHeader column="supplier_name" label="Supplier" />
 
                 {/* Company - Sortable with Filter */}
                 <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 min-w-[150px] relative">
@@ -719,27 +1200,9 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                   )}
                 </th>
 
-                {/* Mail Subject - Sortable */}
-                <th
-                  onClick={() => handleSort('mail_subject')}
-                  className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 min-w-[180px] cursor-pointer hover:bg-gray-100 select-none"
-                >
-                  <div className="flex items-center gap-1">
-                    <span>Mail Subject</span>
-                    {getSortIcon('mail_subject')}
-                  </div>
-                </th>
+                <ResizableHeader column="mail_subject" label="Mail Subject" />
 
-                {/* ACE ERP No - Sortable */}
-                <th
-                  onClick={() => handleSort('aceerp_no')}
-                  className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 cursor-pointer hover:bg-gray-100 select-none"
-                >
-                  <div className="flex items-center gap-1">
-                    <span>ACE ERP#</span>
-                    {getSortIcon('aceerp_no')}
-                  </div>
-                </th>
+                <ResizableHeader column="aceerp_no" label="ACE ERP#" />
 
                 {/* Pipeline Status with filter */}
                 <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 relative min-w-[130px]">
@@ -786,24 +1249,120 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                 </th>
 
                 {/* Our Side */}
-                <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 min-w-[120px]">
-                  <span>Our Side</span>
+                <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 min-w-[120px] relative">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>Our Side</span>
+                    <button
+                      onClick={() => setOpenFilter(openFilter === 'our_side' ? null : 'our_side')}
+                      className={`p-0.5 rounded hover:bg-gray-200 ${isColumnFiltered('our_side') ? 'text-blue-600' : ''}`}
+                    >
+                      <ChevronDown className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {openFilter === 'our_side' && (
+                    <div ref={filterRef} className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-50 w-56">
+                      <div className="p-2 border-b border-gray-200 flex items-center justify-between">
+                        <span className="text-xs font-medium">Filter Our Side</span>
+                        {isColumnFiltered('our_side') && (
+                          <button
+                            onClick={() => clearColumnFilter('our_side')}
+                            className="text-xs text-blue-600 hover:text-blue-700"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      <div className="p-2 space-y-1">
+                        <button
+                          onClick={() => {
+                            const pricePendingInquiries = inquiries.filter(i =>
+                              (i.price_required ?? true) && !i.price_sent_at
+                            );
+                            setFilteredData(pricePendingInquiries);
+                            setOpenFilter(null);
+                          }}
+                          className="w-full flex items-center gap-2 p-2 hover:bg-red-50 rounded text-left text-sm"
+                        >
+                          <span className="w-5 h-5 rounded bg-red-100 text-red-700 flex items-center justify-center font-bold text-xs">P</span>
+                          <span>Price Pending</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            const coaPendingInquiries = inquiries.filter(i =>
+                              (i.coa_required ?? true) && !i.coa_sent_at
+                            );
+                            setFilteredData(coaPendingInquiries);
+                            setOpenFilter(null);
+                          }}
+                          className="w-full flex items-center gap-2 p-2 hover:bg-red-50 rounded text-left text-sm"
+                        >
+                          <span className="w-5 h-5 rounded bg-red-100 text-red-700 flex items-center justify-center font-bold text-xs">C</span>
+                          <span>COA Pending</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            const priceSentInquiries = inquiries.filter(i =>
+                              (i.price_required ?? true) && i.price_sent_at
+                            );
+                            setFilteredData(priceSentInquiries);
+                            setOpenFilter(null);
+                          }}
+                          className="w-full flex items-center gap-2 p-2 hover:bg-green-50 rounded text-left text-sm"
+                        >
+                          <span className="w-5 h-5 rounded bg-green-100 text-green-700 flex items-center justify-center font-bold text-xs">P</span>
+                          <span>Price Sent</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            const coaSentInquiries = inquiries.filter(i =>
+                              (i.coa_required ?? true) && i.coa_sent_at
+                            );
+                            setFilteredData(coaSentInquiries);
+                            setOpenFilter(null);
+                          }}
+                          className="w-full flex items-center gap-2 p-2 hover:bg-green-50 rounded text-left text-sm"
+                        >
+                          <span className="w-5 h-5 rounded bg-green-100 text-green-700 flex items-center justify-center font-bold text-xs">C</span>
+                          <span>COA Sent</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </th>
 
                 {profile?.role === 'admin' && (
-                  <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300">
+                  <th
+                    style={{ width: columnWidths.purchase_price, minWidth: columnWidths.purchase_price }}
+                    className="relative px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300"
+                  >
                     <span>P.Price</span>
+                    <div
+                      className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-400"
+                      onMouseDown={(e) => handleResizeStart('purchase_price', e)}
+                    />
                   </th>
                 )}
 
-                {/* Offered Price */}
-                <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300">
+                <th
+                  style={{ width: columnWidths.offered_price, minWidth: columnWidths.offered_price }}
+                  className="relative px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300"
+                >
                   <span>O.Price</span>
+                  <div
+                    className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-400"
+                    onMouseDown={(e) => handleResizeStart('offered_price', e)}
+                  />
                 </th>
 
-                {/* Delivery Date */}
-                <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300">
+                <th
+                  style={{ width: columnWidths.delivery_date, minWidth: columnWidths.delivery_date }}
+                  className="relative px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300"
+                >
                   <span>Delivery</span>
+                  <div
+                    className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-400"
+                    onMouseDown={(e) => handleResizeStart('delivery_date', e)}
+                  />
                 </th>
 
                 {/* Priority with filter */}
@@ -851,16 +1410,7 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                   )}
                 </th>
 
-                {/* Remarks - Sortable */}
-                <th
-                  onClick={() => handleSort('remarks')}
-                  className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300 min-w-[200px] cursor-pointer hover:bg-gray-100 select-none"
-                >
-                  <div className="flex items-center gap-1">
-                    <span>Remarks</span>
-                    {getSortIcon('remarks')}
-                  </div>
-                </th>
+                <ResizableHeader column="remarks" label="Remarks" />
               </tr>
             </thead>
             <tbody>
@@ -872,8 +1422,8 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                 </tr>
               ) : (
                 filteredData.map((inquiry) => (
+                  <React.Fragment key={inquiry.id}>
                   <tr
-                    key={inquiry.id}
                     className={`border-b border-gray-200 hover:bg-blue-50 transition ${
                       selectedRows.has(inquiry.id) ? 'bg-blue-100' : ''
                     }`}
@@ -888,7 +1438,25 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                     </td>
 
                     <td className="px-3 py-2 border-r border-gray-200 font-medium text-blue-600">
-                      {inquiry.inquiry_number}
+                      <div className="flex items-center gap-1">
+                        {inquiry.has_items && (
+                          <button
+                            onClick={() => toggleRowExpansion(inquiry.id)}
+                            className="hover:bg-blue-100 rounded p-0.5 transition"
+                            title={expandedRows.has(inquiry.id) ? "Collapse products" : "Expand products"}
+                          >
+                            {expandedRows.has(inquiry.id) ? (
+                              <ChevronDown className="w-4 h-4" />
+                            ) : (
+                              <ChevronRight className="w-4 h-4" />
+                            )}
+                          </button>
+                        )}
+                        {inquiry.is_multi_product && (
+                          <Layers className="w-3.5 h-3.5 text-blue-500" title="Multi-product inquiry" />
+                        )}
+                        <span>{inquiry.inquiry_number}</span>
+                      </div>
                     </td>
 
                     <td className="px-3 py-2 border-r border-gray-200 text-gray-600 whitespace-nowrap">
@@ -1074,30 +1642,11 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
 
                     {/* Our Side */}
                     <td className="px-3 py-2 border-r border-gray-200">
-                      <div className="flex items-center justify-between gap-1">
-                        <OurSideChips inquiry={inquiry} />
-                        {canManage && (
-                          <div className="flex gap-0.5">
-                            {inquiry.price_required && !inquiry.price_sent_at && (
-                              <button
-                                onClick={() => markRequirementSent(inquiry, 'price')}
-                                className="p-1 text-green-600 hover:bg-green-50 rounded"
-                                title="Mark Price Sent"
-                              >
-                                <Check className="w-3 h-3" />
-                              </button>
-                            )}
-                            {inquiry.coa_required && !inquiry.coa_sent_at && (
-                              <button
-                                onClick={() => markRequirementSent(inquiry, 'coa')}
-                                className="p-1 text-green-600 hover:bg-green-50 rounded"
-                                title="Mark COA Sent"
-                              >
-                                <Check className="w-3 h-3" />
-                              </button>
-                            )}
-                          </div>
-                        )}
+                      <div className="flex items-center justify-center">
+                        <OurSideChips
+                          inquiry={inquiry}
+                          onMarkSent={canManage ? (type) => markRequirementSent(inquiry, type) : undefined}
+                        />
                       </div>
                     </td>
 
@@ -1106,8 +1655,7 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                       <td className="px-3 py-2 border-r border-gray-200">
                         {editingCell?.id === inquiry.id && editingCell?.field === 'purchase_price' ? (
                           <input
-                            type="number"
-                            step="0.01"
+                            type="text"
                             value={editValue}
                             onChange={(e) => setEditValue(e.target.value)}
                             onBlur={saveEdit}
@@ -1117,6 +1665,7 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                             }}
                             className="w-full px-2 py-1 border-2 border-blue-500 rounded focus:outline-none text-xs"
                             autoFocus
+                            placeholder="Click to add"
                           />
                         ) : (
                           <div
@@ -1136,8 +1685,7 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                     <td className="px-3 py-2 border-r border-gray-200">
                       {editingCell?.id === inquiry.id && editingCell?.field === 'offered_price' ? (
                         <input
-                          type="number"
-                          step="0.01"
+                          type="text"
                           value={editValue}
                           onChange={(e) => setEditValue(e.target.value)}
                           onBlur={saveEdit}
@@ -1147,6 +1695,7 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                           }}
                           className="w-full px-2 py-1 border-2 border-blue-500 rounded focus:outline-none text-xs"
                           autoFocus
+                          placeholder="Click to add"
                         />
                       ) : (
                         <div
@@ -1232,6 +1781,54 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
                       )}
                     </td>
                   </tr>
+                  {inquiry.has_items && expandedRows.has(inquiry.id) && inquiryItems.get(inquiry.id)?.map((item) => (
+                    <tr key={item.id} className="bg-blue-50 border-b border-blue-100">
+                      <td className="px-3 py-2 border-r border-gray-200"></td>
+                      <td className="px-3 py-2 border-r border-gray-200 text-sm text-blue-700 pl-8">
+                        {item.inquiry_number}
+                      </td>
+                      <td className="px-3 py-2 border-r border-gray-200 text-xs text-gray-500">
+                        -
+                      </td>
+                      <td className="px-3 py-2 border-r border-gray-200 text-sm">
+                        {item.product_name}
+                      </td>
+                      <td className="px-3 py-2 border-r border-gray-200 text-xs text-gray-600">
+                        {item.specification || '-'}
+                      </td>
+                      <td className="px-3 py-2 border-r border-gray-200 text-sm">
+                        {item.quantity}
+                      </td>
+                      <td className="px-3 py-2 border-r border-gray-200 text-xs text-gray-500">-</td>
+                      <td className="px-3 py-2 border-r border-gray-200 text-xs text-gray-500">-</td>
+                      <td className="px-3 py-2 border-r border-gray-200 text-xs text-gray-500">-</td>
+                      <td className="px-3 py-2 border-r border-gray-200 text-xs text-gray-500">-</td>
+                      <td className="px-3 py-2 border-r border-gray-200">
+                        <PipelineStatusBadge status={item.pipeline_stage} />
+                      </td>
+                      <td className="px-3 py-2 border-r border-gray-200 text-center">
+                        {item.document_sent ? (
+                          <div className="flex items-center justify-center gap-1">
+                            <Check className="w-4 h-4 text-green-600" />
+                            <span className="text-xs text-gray-500">
+                              {item.document_sent_at ? new Date(item.document_sent_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : ''}
+                            </span>
+                          </div>
+                        ) : (
+                          <XCircle className="w-4 h-4 text-gray-400 mx-auto" />
+                        )}
+                      </td>
+                      <td className="px-3 py-2 border-r border-gray-200 text-xs text-gray-600">
+                        {item.notes || '-'}
+                      </td>
+                      <td className="px-3 py-2 border-r border-gray-200"></td>
+                      <td className="px-3 py-2 border-r border-gray-200"></td>
+                      <td className="px-3 py-2 border-r border-gray-200"></td>
+                      <td className="px-3 py-2 border-r border-gray-200"></td>
+                      <td className="px-3 py-2 border-r border-gray-200"></td>
+                    </tr>
+                  ))}
+                </React.Fragment>
                 ))
               )}
             </tbody>
@@ -1384,6 +1981,140 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage }: InquiryTa
           }}
         />
       )}
+
+      {/* Offered Price Modal */}
+      <Modal
+        isOpen={offeredPriceModalOpen}
+        onClose={() => {
+          setOfferedPriceModalOpen(false);
+          setInquiryForOfferedPrice(null);
+          setOfferedPriceInput('');
+        }}
+        title="Enter Offered Price"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Inquiry: {inquiryForOfferedPrice?.inquiry_number || '-'}
+            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Product: {inquiryForOfferedPrice?.product_name || '-'}
+            </label>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Offered Price (O.Price) *
+            </label>
+            <input
+              type="number"
+              value={offeredPriceInput}
+              onChange={(e) => setOfferedPriceInput(e.target.value)}
+              placeholder="Enter offered price"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              step="0.01"
+              min="0"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Enter the price you offered to the customer
+            </p>
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6">
+            <button
+              onClick={() => {
+                setOfferedPriceModalOpen(false);
+                setInquiryForOfferedPrice(null);
+                setOfferedPriceInput('');
+              }}
+              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={saveOfferedPriceAndMarkSent}
+              className="px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+            >
+              Save & Mark Price as Sent
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Edit Requirements Modal */}
+      <Modal
+        isOpen={editRequirementsModalOpen}
+        onClose={() => setEditRequirementsModalOpen(false)}
+        title="Edit Customer Requirements"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Check what the customer has requested:
+          </p>
+          <div className="space-y-3">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={requirementsForm.price_required}
+                onChange={(e) => setRequirementsForm({ ...requirementsForm, price_required: e.target.checked })}
+                className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium text-gray-700">Price</span>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={requirementsForm.coa_required}
+                onChange={(e) => setRequirementsForm({ ...requirementsForm, coa_required: e.target.checked })}
+                className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium text-gray-700">COA</span>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={requirementsForm.sample_required}
+                onChange={(e) => setRequirementsForm({ ...requirementsForm, sample_required: e.target.checked })}
+                className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium text-gray-700">Sample</span>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={requirementsForm.agency_letter_required}
+                onChange={(e) => setRequirementsForm({ ...requirementsForm, agency_letter_required: e.target.checked })}
+                className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium text-gray-700">Agency Letter</span>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={requirementsForm.others_required}
+                onChange={(e) => setRequirementsForm({ ...requirementsForm, others_required: e.target.checked })}
+                className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium text-gray-700">Others</span>
+            </label>
+          </div>
+          <div className="flex justify-end gap-2 mt-6 pt-4 border-t">
+            <button
+              onClick={() => setEditRequirementsModalOpen(false)}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={saveRequirements}
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition"
+            >
+              Save Requirements
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
+

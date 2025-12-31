@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { DataTable } from '../DataTable';
 import { Modal } from '../Modal';
-import { TrendingUp, Plus } from 'lucide-react';
+import { TrendingUp, RefreshCw } from 'lucide-react';
 import { useNavigation } from '../../contexts/NavigationContext';
 
 interface SalesInvoice {
@@ -37,12 +37,13 @@ interface BankAccount {
 }
 
 export function ReceivablesManager({ canManage }: { canManage: boolean }) {
-  const { navigateTo } = useNavigation();
+  const { setCurrentPage } = useNavigation();
   const [view, setView] = useState<'invoices' | 'payments'>('invoices');
   const [invoices, setInvoices] = useState<SalesInvoice[]>([]);
   const [payments, setPayments] = useState<CustomerPayment[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<SalesInvoice | null>(null);
   const [customerInvoices, setCustomerInvoices] = useState<SalesInvoice[]>([]);
@@ -57,11 +58,7 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
     notes: '',
   });
 
-  useEffect(() => {
-    loadData();
-  }, [view]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const [invoicesRes, paymentsRes, banksRes] = await Promise.all([
         supabase
@@ -99,7 +96,20 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
       console.error('Error loading data:', error);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(loadData, 30000);
+    return () => clearInterval(interval);
+  }, [loadData]);
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    loadData();
   };
 
   const handleRecordPayment = async (invoice: SalesInvoice) => {
@@ -230,7 +240,7 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
       label: 'Invoice #',
       render: (inv: SalesInvoice) => (
         <button
-          onClick={() => navigateTo('sales')}
+          onClick={() => setCurrentPage('sales')}
           className="text-blue-600 hover:underline font-medium"
         >
           {inv.invoice_number}
@@ -366,7 +376,32 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
             Payment History
           </button>
         </div>
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition"
+          title="Refresh data"
+        >
+          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          <span className="text-sm">Refresh</span>
+        </button>
       </div>
+
+      {/* Help Banner */}
+      {view === 'invoices' && invoices.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
+          <div className="bg-blue-100 rounded-full p-2">
+            <TrendingUp className="w-5 h-5 text-blue-600" />
+          </div>
+          <div>
+            <p className="font-medium text-blue-900">Recording Customer Payments</p>
+            <p className="text-sm text-blue-700 mt-1">
+              Click the green <span className="font-semibold">"Record Payment"</span> button next to any invoice to record payment received from customers.
+              The invoice status will automatically change from "pending" to "paid" once full payment is allocated.
+            </p>
+          </div>
+        </div>
+      )}
 
       {view === 'invoices' ? (
         <>
@@ -374,7 +409,7 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
             <div className="text-center py-12 text-gray-500">
               <TrendingUp className="w-16 h-16 mx-auto mb-4 text-gray-400" />
               <p className="text-lg font-medium">All Caught Up!</p>
-              <p className="text-sm mt-2">No outstanding invoices</p>
+              <p className="text-sm mt-2">No outstanding invoices - all payments received!</p>
             </div>
           ) : (
             <DataTable
@@ -384,8 +419,9 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
               actions={canManage ? (invoice) => (
                 <button
                   onClick={() => handleRecordPayment(invoice)}
-                  className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition shadow-sm"
                 >
+                  <span className="text-lg">+</span>
                   Record Payment
                 </button>
               ) : undefined}
@@ -410,7 +446,7 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
           resetForm();
         }}
         title="Record Customer Payment"
-        maxWidth="max-w-4xl"
+        size="lg"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           {selectedInvoice && (
