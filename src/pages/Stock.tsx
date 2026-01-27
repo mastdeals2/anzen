@@ -13,7 +13,7 @@ interface StockSummary {
   unit: string;
   category: string;
   total_current_stock: number;
-  reserved_quantity: number;
+  reserved_stock: number; // HARDENING FIX #4: Standardized to match DB column name
   available_quantity: number;
   active_batch_count: number;
   expired_batch_count: number;
@@ -24,7 +24,7 @@ interface DetailedBatch {
   id: string;
   batch_number: string;
   current_stock: number;
-  reserved_quantity: number;
+  reserved_stock: number; // HARDENING FIX #4: Standardized to match DB column name
   available_quantity: number;
   expiry_date: string | null;
   import_date: string;
@@ -83,7 +83,7 @@ export function Stock() {
 
           return {
             ...product,
-            reserved_quantity: displayed_reserved,
+            reserved_stock: displayed_reserved, // HARDENING FIX #4: Standardized field name
             available_quantity
           };
         })
@@ -91,7 +91,7 @@ export function Stock() {
 
       // Filter: show products with stock > 0 OR reserved != 0 (including negative) OR has shortage
       const filteredProducts = productsWithReserved.filter(
-        p => p.total_current_stock > 0 || p.reserved_quantity !== 0 || shortageMap.has(p.product_id)
+        p => p.total_current_stock > 0 || p.reserved_stock !== 0 || shortageMap.has(p.product_id)
       );
 
       setStockSummary(filteredProducts);
@@ -114,9 +114,9 @@ export function Stock() {
 
       if (error) throw error;
 
+      // HARDENING FIX #4: No need to map - use DB column name directly
       const batchesWithReserved = (data || []).map(batch => ({
         ...batch,
-        reserved_quantity: batch.reserved_stock || 0,
         available_quantity: batch.current_stock - (batch.reserved_stock || 0)
       }));
 
@@ -157,7 +157,7 @@ export function Stock() {
     {
       key: 'product_name',
       label: 'Product',
-      render: (item: StockSummary) => (
+      render: (value: any, item: StockSummary) => (
         <div className="py-1">
           <span className="font-medium text-gray-900">{item.product_name}</span>
           <span className="text-xs text-gray-500 ml-2 capitalize">({item.category})</span>
@@ -167,7 +167,7 @@ export function Stock() {
     {
       key: 'stock',
       label: 'Total Stock',
-      render: (item: StockSummary) => (
+      render: (value: any, item: StockSummary) => (
         <span className={`font-semibold ${getStockStatusColor(item.total_current_stock, item.active_batch_count)}`}>
           {item.total_current_stock.toLocaleString()} {item.unit}
         </span>
@@ -176,18 +176,18 @@ export function Stock() {
     {
       key: 'reserved',
       label: 'Reserved',
-      render: (item: StockSummary) => {
-        if (item.reserved_quantity === 0) return <span className="text-gray-400">-</span>;
-        if (item.reserved_quantity < 0) {
+      render: (value: any, item: StockSummary) => {
+        if (item.reserved_stock === 0) return <span className="text-gray-400">-</span>;
+        if (item.reserved_stock < 0) {
           return (
             <span className="text-red-600 font-semibold">
-              {item.reserved_quantity.toLocaleString()} {item.unit}
+              {item.reserved_stock.toLocaleString()} {item.unit}
             </span>
           );
         }
         return (
           <span className="text-orange-600 font-medium">
-            {item.reserved_quantity.toLocaleString()} {item.unit}
+            {item.reserved_stock.toLocaleString()} {item.unit}
           </span>
         );
       }
@@ -195,7 +195,7 @@ export function Stock() {
     {
       key: 'available',
       label: 'Available',
-      render: (item: StockSummary) => (
+      render: (value: any, item: StockSummary) => (
         <span className="text-green-600 font-semibold">
           {item.available_quantity.toLocaleString()} {item.unit}
         </span>
@@ -204,7 +204,7 @@ export function Stock() {
     {
       key: 'batches',
       label: 'Batches',
-      render: (item: StockSummary) => (
+      render: (value: any, item: StockSummary) => (
         <span className="text-sm">
           <span className="text-blue-600 font-medium">{item.active_batch_count}</span>
           {item.expired_batch_count > 0 && (
@@ -216,7 +216,7 @@ export function Stock() {
     {
       key: 'expiry',
       label: 'Nearest Expiry',
-      render: (item: StockSummary) => (
+      render: (value: any, item: StockSummary) => (
         item.nearest_expiry_date ? (
           <span className={`text-sm ${
             isExpired(item.nearest_expiry_date) ? 'text-red-700 font-semibold' :
@@ -239,30 +239,30 @@ export function Stock() {
     {
       key: 'batch_number',
       label: 'Batch',
-      render: (batch: DetailedBatch) => (
+      render: (value: any, batch: DetailedBatch) => (
         <span className="font-mono text-sm">{batch.batch_number}</span>
       )
     },
     {
-      key: 'total_stock',
+      key: 'current_stock',
       label: 'Total',
-      render: (batch: DetailedBatch) => (
+      render: (value: any, batch: DetailedBatch) => (
         <span className="font-semibold text-sm">{batch.current_stock.toLocaleString()} {selectedProduct?.unit}</span>
       )
     },
     {
-      key: 'reserved',
+      key: 'reserved_stock',
       label: 'Reserved',
-      render: (batch: DetailedBatch) => (
+      render: (value: any, batch: DetailedBatch) => (
         <span className="text-orange-600 font-medium text-sm">
-          {batch.reserved_quantity > 0 ? `${batch.reserved_quantity.toLocaleString()} ${selectedProduct?.unit}` : '-'}
+          {batch.reserved_stock > 0 ? `${batch.reserved_stock.toLocaleString()} ${selectedProduct?.unit}` : '-'}
         </span>
       )
     },
     {
-      key: 'available',
+      key: 'available_quantity',
       label: 'Available',
-      render: (batch: DetailedBatch) => (
+      render: (value: any, batch: DetailedBatch) => (
         <span className="text-green-600 font-semibold text-sm">
           {batch.available_quantity.toLocaleString()} {selectedProduct?.unit}
         </span>
@@ -271,7 +271,7 @@ export function Stock() {
     {
       key: 'import_date',
       label: 'Imported',
-      render: (batch: DetailedBatch) => (
+      render: (value: any, batch: DetailedBatch) => (
         <span className="text-sm text-gray-600">
           {new Date(batch.import_date).toLocaleDateString()}
         </span>
@@ -280,7 +280,7 @@ export function Stock() {
     {
       key: 'expiry_date',
       label: 'Expiry',
-      render: (batch: DetailedBatch) => (
+      render: (value: any, batch: DetailedBatch) => (
         <span className={`text-sm ${
           isExpired(batch.expiry_date) ? 'text-red-700 font-semibold' :
           isNearExpiry(batch.expiry_date) ? 'text-orange-600 font-semibold' :

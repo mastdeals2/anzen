@@ -26,6 +26,8 @@ interface ImportContainer {
   port_charges: number;
   container_handling: number;
   transportation: number;
+  loading_import: number;
+  bpom_ski_fees: number;
   other_import_costs: number;
   total_import_expenses: number;
   allocated_expenses: number;
@@ -34,6 +36,15 @@ interface ImportContainer {
   locked_at: string | null;
   notes: string;
   suppliers?: Supplier;
+  linked_expenses_total?: number;
+}
+
+interface LinkedExpense {
+  id: string;
+  expense_category: string;
+  amount: number;
+  expense_date: string;
+  description: string | null;
 }
 
 export default function ImportContainers() {
@@ -43,6 +54,7 @@ export default function ImportContainers() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingContainer, setEditingContainer] = useState<ImportContainer | null>(null);
+  const [linkedExpenses, setLinkedExpenses] = useState<LinkedExpense[]>([]);
   const [formData, setFormData] = useState({
     container_ref: '',
     supplier_id: '',
@@ -58,6 +70,8 @@ export default function ImportContainers() {
     port_charges: 0,
     container_handling: 0,
     transportation: 0,
+    loading_import: 0,
+    bpom_ski_fees: 0,
     other_import_costs: 0,
     notes: ''
   });
@@ -65,12 +79,40 @@ export default function ImportContainers() {
   useEffect(() => {
     fetchContainers();
     fetchSuppliers();
+
+    // Set up realtime subscriptions for import containers and linked expenses
+    const containerSubscription = supabase
+      .channel('container-changes')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'import_containers' },
+        () => {
+          fetchContainers();
+        }
+      )
+      .subscribe();
+
+    const expenseSubscription = supabase
+      .channel('expense-container-changes')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'finance_expenses' },
+        () => {
+          fetchContainers();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      containerSubscription.unsubscribe();
+      expenseSubscription.unsubscribe();
+    };
   }, []);
 
   const fetchContainers = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+
+      // Fetch containers with suppliers
+      const { data: containersData, error } = await supabase
         .from('import_containers')
         .select(`
           *,
@@ -79,10 +121,28 @@ export default function ImportContainers() {
             company_name
           )
         `)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false});
 
       if (error) throw error;
-      setContainers(data || []);
+
+      // For each container, calculate linked expenses total
+      const containersWithExpenses = await Promise.all(
+        (containersData || []).map(async (container) => {
+          const { data: expenses } = await supabase
+            .from('finance_expenses')
+            .select('amount')
+            .eq('import_container_id', container.id);
+
+          const linkedExpensesTotal = expenses?.reduce((sum, exp) => sum + Number(exp.amount), 0) || 0;
+
+          return {
+            ...container,
+            linked_expenses_total: linkedExpensesTotal
+          };
+        })
+      );
+
+      setContainers(containersWithExpenses);
     } catch (error: any) {
       console.error('Error fetching containers:', error.message);
       alert('Failed to load import containers');
@@ -187,9 +247,42 @@ export default function ImportContainers() {
       other_import_costs: 0,
       notes: ''
     });
+    setLinkedExpenses([]);
   };
 
-  const handleEdit = (container: ImportContainer) => {
+  const loadLinkedExpenses = async (containerId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('finance_expenses')
+        .select('id, expense_category, amount, expense_date, description')
+        .eq('import_container_id', containerId)
+        .order('expense_date', { ascending: false });
+
+      if (error) throw error;
+      setLinkedExpenses(data || []);
+    } catch (error: any) {
+      console.error('Error loading linked expenses:', error);
+      setLinkedExpenses([]);
+    }
+  };
+
+  const getExpenseCategoryLabel = (category: string): string => {
+    const labels: Record<string, string> = {
+      duty_customs: 'Duty & Customs (BM)',
+      ppn_import: 'PPN Import',
+      pph_import: 'PPh Import',
+      freight_import: 'Freight (Import)',
+      clearing_forwarding: 'Clearing & Forwarding',
+      port_charges: 'Port Charges',
+      container_handling: 'Container Handling',
+      transport_import: 'Transportation (Import)',
+      loading_import: 'Loading / Unloading (Import)',
+      bpom_ski_fees: 'BPOM / SKI Fees',
+    };
+    return labels[category] || category;
+  };
+
+  const handleEdit = async (container: ImportContainer) => {
     setEditingContainer(container);
     setFormData({
       container_ref: container.container_ref,
@@ -206,9 +299,15 @@ export default function ImportContainers() {
       port_charges: container.port_charges || 0,
       container_handling: container.container_handling || 0,
       transportation: container.transportation || 0,
+      loading_import: container.loading_import || 0,
+      bpom_ski_fees: container.bpom_ski_fees || 0,
       other_import_costs: container.other_import_costs || 0,
       notes: container.notes || ''
     });
+
+    // Load linked expenses
+    await loadLinkedExpenses(container.id);
+
     setShowModal(true);
   };
 
@@ -234,7 +333,7 @@ export default function ImportContainers() {
     if (currency === 'USD') {
       return `$ ${amount?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
-    return `Rp ${amount?.toLocaleString('id-ID')}`;
+    return `Rp ${amount?.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   const calculateTotal = () => {
@@ -247,6 +346,8 @@ export default function ImportContainers() {
       (formData.port_charges || 0) +
       (formData.container_handling || 0) +
       (formData.transportation || 0) +
+      (formData.loading_import || 0) +
+      (formData.bpom_ski_fees || 0) +
       (formData.other_import_costs || 0)
     );
   };
@@ -323,9 +424,14 @@ export default function ImportContainers() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
-                      <div className="text-sm text-gray-900">
-                        {formatCurrency(container.total_import_expenses || 0, 'IDR')}
+                      <div className="text-sm text-gray-900 font-semibold">
+                        {formatCurrency(container.linked_expenses_total || 0, 'IDR')}
                       </div>
+                      {container.total_import_expenses > 0 && container.total_import_expenses !== container.linked_expenses_total && (
+                        <div className="text-xs text-gray-500">
+                          Direct: {formatCurrency(container.total_import_expenses, 'IDR')}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center">
                       {getStatusBadge(container.status)}
@@ -560,17 +666,47 @@ export default function ImportContainers() {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                     />
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Loading / Unloading
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formData.loading_import}
+                      onChange={(e) => setFormData({ ...formData, loading_import: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      BPOM / SKI Fees
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formData.bpom_ski_fees}
+                      onChange={(e) => setFormData({ ...formData, bpom_ski_fees: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    />
+                  </div>
                   <div className="col-span-2">
                     <label className="block text-xs font-medium text-gray-700 mb-1">
                       Other Import Costs
+                      <span className="text-xs text-blue-600 ml-2">✓ Auto-calculated from expenses</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       value={formData.other_import_costs}
-                      onChange={(e) => setFormData({ ...formData, other_import_costs: parseFloat(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                      readOnly
+                      disabled
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-gray-100 cursor-not-allowed"
+                      title="This is automatically calculated from all 'Other (Import)' expenses linked to this container"
                     />
+                    <p className="text-xs text-gray-600 mt-1">
+                      Add expenses with category "Other (Import)" in Finance → Expenses to update this
+                    </p>
                   </div>
                 </div>
 
@@ -581,6 +717,42 @@ export default function ImportContainers() {
                   </div>
                 </div>
               </div>
+
+              {editingContainer && linkedExpenses.length > 0 && (
+                <div className="bg-green-50 border-2 border-green-200 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-green-900 mb-3">
+                    📎 Linked Expenses from Finance Tracker
+                  </h3>
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {linkedExpenses.map((expense) => (
+                      <div key={expense.id} className="bg-white rounded p-3 flex justify-between items-center">
+                        <div className="flex-1">
+                          <div className="font-medium text-sm text-gray-900">
+                            {getExpenseCategoryLabel(expense.expense_category)}
+                          </div>
+                          <div className="text-xs text-gray-600">
+                            {expense.expense_date} • {expense.description || 'No description'}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-semibold text-green-700">
+                            {formatCurrency(expense.amount, 'IDR')}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-green-300 flex justify-between items-center">
+                    <span className="text-sm font-semibold text-green-900">Total from Linked Expenses:</span>
+                    <span className="text-lg font-bold text-green-900">
+                      {formatCurrency(linkedExpenses.reduce((sum, exp) => sum + exp.amount, 0), 'IDR')}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-green-700">
+                    💡 These expenses are automatically linked to this container. Add new expenses in the Finance &gt; Expense Manager and select this container.
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>

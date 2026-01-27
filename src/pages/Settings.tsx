@@ -44,7 +44,14 @@ interface UserProfile {
 export function Settings() {
   const { t } = useLanguage();
   const { profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'company' | 'users' | 'suppliers' | 'system' | 'financial' | 'gmail' | 'templates' | 'extract'>('company');
+
+  const getDefaultTab = () => {
+    if (profile?.role === 'sales') return 'gmail';
+    if (profile?.role === 'accounts') return 'company';
+    return 'company';
+  };
+
+  const [activeTab, setActiveTab] = useState<'company' | 'users' | 'suppliers' | 'system' | 'financial' | 'gmail' | 'templates' | 'extract'>(getDefaultTab());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -167,7 +174,11 @@ export function Settings() {
   };
 
 
-  if (profile?.role !== 'admin') {
+  const isAdmin = profile?.role === 'admin';
+  const isSales = profile?.role === 'sales';
+  const isAccountant = profile?.role === 'accounts';
+
+  if (!isAdmin && !isSales && !isAccountant) {
     return (
       <Layout>
         <div className="text-center py-12">
@@ -199,110 +210,126 @@ export function Settings() {
         <div className="bg-white rounded-lg shadow">
           <div className="border-b border-gray-200">
             <nav className="flex -mb-px">
-              <button
-                onClick={() => setActiveTab('company')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
-                  activeTab === 'company'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Building2 className="w-4 h-4" />
-                  Company Profile
-                </div>
-              </button>
-              <button
-                onClick={() => setActiveTab('users')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
-                  activeTab === 'users'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Users className="w-4 h-4" />
-                  Users
-                </div>
-              </button>
-              <button
-                onClick={() => setActiveTab('suppliers')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
-                  activeTab === 'suppliers'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Package className="w-4 h-4" />
-                  Suppliers
-                </div>
-              </button>
-              <button
-                onClick={() => setActiveTab('financial')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
-                  activeTab === 'financial'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4" />
-                  Financial Year
-                </div>
-              </button>
-              <button
-                onClick={() => setActiveTab('system')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
-                  activeTab === 'system'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Package className="w-4 h-4" />
-                  System
-                </div>
-              </button>
-              <button
-                onClick={() => setActiveTab('gmail')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
-                  activeTab === 'gmail'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Mail className="w-4 h-4" />
-                  Gmail
-                </div>
-              </button>
-              <button
-                onClick={() => setActiveTab('templates')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
-                  activeTab === 'templates'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4" />
-                  Email Templates
-                </div>
-              </button>
-              <button
-                onClick={() => setActiveTab('extract')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
-                  activeTab === 'extract'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Download className="w-4 h-4" />
-                  Extract Data
-                </div>
-              </button>
+              {(isAdmin || isAccountant) && (
+                <button
+                  onClick={() => setActiveTab('company')}
+                  className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
+                    activeTab === 'company'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-4 h-4" />
+                    Company Profile
+                  </div>
+                </button>
+              )}
+              {isAdmin && (
+                <button
+                  onClick={() => setActiveTab('users')}
+                  className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
+                    activeTab === 'users'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Users className="w-4 h-4" />
+                    Users
+                  </div>
+                </button>
+              )}
+              {(isAdmin || isAccountant) && (
+                <button
+                  onClick={() => setActiveTab('suppliers')}
+                  className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
+                    activeTab === 'suppliers'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Package className="w-4 h-4" />
+                    Suppliers
+                  </div>
+                </button>
+              )}
+              {isAdmin && (
+                <button
+                  onClick={() => setActiveTab('financial')}
+                  className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
+                    activeTab === 'financial'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4" />
+                    Financial Year
+                  </div>
+                </button>
+              )}
+              {isAdmin && (
+                <button
+                  onClick={() => setActiveTab('system')}
+                  className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
+                    activeTab === 'system'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Package className="w-4 h-4" />
+                    System
+                  </div>
+                </button>
+              )}
+              {(isAdmin || isSales) && (
+                <button
+                  onClick={() => setActiveTab('gmail')}
+                  className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
+                    activeTab === 'gmail'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Mail className="w-4 h-4" />
+                    Gmail
+                  </div>
+                </button>
+              )}
+              {(isAdmin || isSales) && (
+                <button
+                  onClick={() => setActiveTab('templates')}
+                  className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
+                    activeTab === 'templates'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4" />
+                    Email Templates
+                  </div>
+                </button>
+              )}
+              {(isAdmin || isSales) && (
+                <button
+                  onClick={() => setActiveTab('extract')}
+                  className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
+                    activeTab === 'extract'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Download className="w-4 h-4" />
+                    Extract Data
+                  </div>
+                </button>
+              )}
             </nav>
           </div>
 
