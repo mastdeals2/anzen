@@ -240,7 +240,7 @@ export function Settings() {
                   </div>
                 </button>
               )}
-              {(isAdmin || isAccountant) && (
+              {(isAdmin || isAccountant || isSales) && (
                 <button
                   onClick={() => setActiveTab('suppliers')}
                   className={`px-6 py-3 text-sm font-medium border-b-2 transition ${

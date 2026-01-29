@@ -214,7 +214,7 @@ export function CAReports() {
         tax_amount,
         total_amount,
         faktur_pajak_number,
-        customers(customer_name)
+        customers(company_name)
       `)
       .gte('invoice_date', dateRange.from)
       .lte('invoice_date', dateRange.to)
@@ -225,7 +225,7 @@ export function CAReports() {
     return data?.map(inv => ({
       invoice_date: inv.invoice_date,
       invoice_number: inv.invoice_number,
-      customer_name: (inv.customers as any)?.customer_name,
+      customer_name: (inv.customers as any)?.company_name,
       tax_invoice_no: inv.faktur_pajak_number,
       net_amount: inv.subtotal,
       ppn: inv.tax_amount,
@@ -244,7 +244,7 @@ export function CAReports() {
         tax_amount,
         total_amount,
         currency,
-        suppliers(supplier_name)
+        suppliers(company_name)
       `)
       .gte('po_date', dateRange.from)
       .lte('po_date', dateRange.to)
@@ -255,7 +255,7 @@ export function CAReports() {
     return data?.map(po => ({
       po_date: po.po_date,
       po_number: po.po_number,
-      supplier_name: (po.suppliers as any)?.supplier_name,
+      supplier_name: (po.suppliers as any)?.company_name,
       net_amount: po.subtotal,
       ppn: po.tax_amount,
       total_amount: po.total_amount,
