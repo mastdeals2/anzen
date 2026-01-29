@@ -76,8 +76,11 @@ export function Batches() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [documentsModalOpen, setDocumentsModalOpen] = useState(false);
+  const [transactionHistoryModal, setTransactionHistoryModal] = useState(false);
   const [selectedBatchDocs, setSelectedBatchDocs] = useState<BatchDocument[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  const [selectedProductForHistory, setSelectedProductForHistory] = useState<{id: string; name: string; code: string} | null>(null);
+  const [transactionHistory, setTransactionHistory] = useState<any[]>([]);
   const [editingBatch, setEditingBatch] = useState<Batch | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
   const [formData, setFormData] = useState({
@@ -498,6 +501,59 @@ export function Batches() {
     });
   };
 
+  const showTransactionHistory = async (productId: string, productName: string, productCode: string) => {
+    setSelectedProductForHistory({ id: productId, name: productName, code: productCode });
+    setTransactionHistoryModal(true);
+
+    // Load transaction history for this product
+    const { data: txns, error } = await supabase
+      .from('inventory_transactions')
+      .select('*')
+      .eq('product_id', productId)
+      .order('transaction_date', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error loading transaction history:', error);
+      alert('Error loading transaction history: ' + error.message);
+      return;
+    }
+
+    // Load related data separately
+    const enrichedData = await Promise.all((txns || []).map(async (txn) => {
+      let dcData = null;
+      let soData = null;
+
+      // Get DC data if reference is a delivery challan
+      if (txn.reference_number && txn.reference_number.startsWith('DO-')) {
+        const { data: dc } = await supabase
+          .from('delivery_challans')
+          .select('challan_number, customer_id, customers(customer_name)')
+          .eq('challan_number', txn.reference_number)
+          .single();
+        dcData = dc;
+      }
+
+      // Get SO data if sales_order_id exists
+      if (txn.sales_order_id) {
+        const { data: so } = await supabase
+          .from('sales_orders')
+          .select('so_number, customer_id, customers(customer_name)')
+          .eq('id', txn.sales_order_id)
+          .single();
+        soData = so;
+      }
+
+      return {
+        ...txn,
+        delivery_challans: dcData,
+        sales_orders: soData
+      };
+    }));
+
+    setTransactionHistory(enrichedData);
+  };
+
   const isLowStock = (batch: Batch) => batch.current_stock < batch.import_quantity * 0.2;
   const isExpired = (batch: Batch) => {
     if (!batch.expiry_date) return false;
@@ -549,7 +605,12 @@ export function Batches() {
       label: 'Product',
       render: (value: any, batch: Batch) => (
         <div>
-          <div className="font-medium">{batch.products?.product_name}</div>
+          <button
+            onClick={() => showTransactionHistory(batch.product_id, batch.products?.product_name || '', batch.products?.product_code || '')}
+            className="font-medium text-blue-600 hover:text-blue-800 hover:underline text-left"
+          >
+            {batch.products?.product_name}
+          </button>
           {batch.products?.product_code && (
             <div className="text-xs text-gray-500">{batch.products.product_code}</div>
           )}
@@ -1344,6 +1405,82 @@ export function Batches() {
               <div className="text-center py-8 text-gray-500">
                 <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
                 <p>No documents uploaded for this batch</p>
+              </div>
+            )}
+          </div>
+        </Modal>
+
+        {/* Transaction History Modal */}
+        <Modal
+          isOpen={transactionHistoryModal}
+          onClose={() => {
+            setTransactionHistoryModal(false);
+            setSelectedProductForHistory(null);
+            setTransactionHistory([]);
+          }}
+          title={`Transaction History - ${selectedProductForHistory?.name || ''} (${selectedProductForHistory?.code || ''})`}
+        >
+          <div className="space-y-3 max-h-[600px] overflow-y-auto">
+            {transactionHistory.length > 0 ? (
+              <div className="space-y-2">
+                {transactionHistory.map((txn, idx) => (
+                  <div
+                    key={txn.id}
+                    className={`p-3 rounded-lg border-l-4 ${
+                      parseFloat(txn.quantity) > 0
+                        ? 'bg-green-50 border-green-500'
+                        : 'bg-red-50 border-red-500'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`font-semibold ${
+                            parseFloat(txn.quantity) > 0 ? 'text-green-700' : 'text-red-700'
+                          }`}>
+                            {parseFloat(txn.quantity) > 0 ? '+' : ''}{parseFloat(txn.quantity).toFixed(3)}
+                          </span>
+                          <span className="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-700 uppercase">
+                            {txn.transaction_type.replace('_', ' ')}
+                          </span>
+                        </div>
+                        <div className="text-sm text-gray-600 space-y-0.5">
+                          <div><strong>Date:</strong> {new Date(txn.transaction_date).toLocaleDateString()}</div>
+                          {txn.reference_number && (
+                            <div><strong>Reference:</strong> {txn.reference_number}</div>
+                          )}
+                          {txn.reference_type === 'delivery_challan' && txn.delivery_challans && (
+                            <div className="text-xs text-blue-600">
+                              DC: {txn.delivery_challans.challan_number}
+                              {txn.delivery_challans.customers && (
+                                <span className="ml-1">→ {txn.delivery_challans.customers.customer_name}</span>
+                              )}
+                            </div>
+                          )}
+                          {txn.sales_order_id && txn.sales_orders && (
+                            <div className="text-xs text-blue-600">
+                              SO: {txn.sales_orders.so_number}
+                              {txn.sales_orders.customers && (
+                                <span className="ml-1">→ {txn.sales_orders.customers.customer_name}</span>
+                              )}
+                            </div>
+                          )}
+                          {txn.notes && (
+                            <div className="text-xs text-gray-500 italic">{txn.notes}</div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right text-xs text-gray-400">
+                        {new Date(txn.created_at).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-500">
+                <Package className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                <p>No transactions found for this product</p>
               </div>
             )}
           </div>

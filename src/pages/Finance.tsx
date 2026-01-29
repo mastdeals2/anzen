@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Layout } from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import { FinanceProvider, useFinance } from '../contexts/FinanceContext';
-import { Calendar, ChevronDown, ChevronRight } from 'lucide-react';
+import { Calendar, ChevronDown, ChevronRight, Menu, X } from 'lucide-react';
 
 // Import all finance components
 import { PurchaseInvoiceManager } from '../components/finance/PurchaseInvoiceManager';
@@ -98,6 +98,7 @@ function FinanceContent() {
   const { dateRange, setDateRange } = useFinance();
   const [activeTab, setActiveTab] = useState<FinanceTab>('purchase');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const canManage = profile?.role === 'admin' || profile?.role === 'accounts';
 
   const toggleGroup = (groupLabel: string) => {
@@ -214,67 +215,78 @@ function FinanceContent() {
   return (
     <Layout>
       <div className="flex h-screen bg-gray-50">
-        {/* Left Sidebar - Narrow Professional Menu */}
-        <div className="w-56 bg-white border-r border-gray-200 flex flex-col">
-          {/* Menu Groups */}
-          <div className="flex-1 overflow-y-auto">
-            {financeMenu.map((group, groupIdx) => {
-              const isCollapsed = collapsedGroups.has(group.label);
-              const isCollapsible = group.collapsible;
+        {/* Left Sidebar - Compact Menu */}
+        {!sidebarCollapsed && (
+          <div className="w-48 bg-white border-r border-gray-200 flex flex-col">
+            {/* Menu Groups */}
+            <div className="flex-1 overflow-y-auto">
+              {financeMenu.map((group, groupIdx) => {
+                const isCollapsed = collapsedGroups.has(group.label);
+                const isCollapsible = group.collapsible;
 
-              return (
-                <div key={group.label} className={groupIdx > 0 ? 'border-t border-gray-200' : ''}>
-                  {isCollapsible ? (
-                    <button
-                      onClick={() => toggleGroup(group.label)}
-                      className="w-full px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center justify-between hover:bg-gray-50"
-                    >
-                      <span>{group.label}</span>
-                      {isCollapsed ? (
-                        <ChevronRight className="w-4 h-4" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4" />
-                      )}
-                    </button>
-                  ) : (
-                    <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      {group.label}
-                    </div>
-                  )}
+                return (
+                  <div key={group.label} className={groupIdx > 0 ? 'border-t border-gray-200' : ''}>
+                    {isCollapsible ? (
+                      <button
+                        onClick={() => toggleGroup(group.label)}
+                        className="w-full px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center justify-between hover:bg-gray-50"
+                      >
+                        <span>{group.label}</span>
+                        {isCollapsed ? (
+                          <ChevronRight className="w-3 h-3" />
+                        ) : (
+                          <ChevronDown className="w-3 h-3" />
+                        )}
+                      </button>
+                    ) : (
+                      <div className="px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                        {group.label}
+                      </div>
+                    )}
 
-                  {!isCollapsed && (
-                    <div>
-                      {group.items.map((item) => (
-                        <button
-                          key={item.id}
-                          onClick={() => setActiveTab(item.id)}
-                          className={`w-full text-left px-4 py-2 text-sm transition-colors ${
-                            activeTab === item.id
-                              ? 'bg-blue-50 text-blue-700 font-medium border-l-2 border-blue-600'
-                              : 'text-gray-700 hover:bg-gray-50 border-l-2 border-transparent'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span>{item.label}</span>
-                            {item.shortcut && (
-                              <span className="text-xs text-gray-400">{item.shortcut}</span>
-                            )}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                    {!isCollapsed && (
+                      <div>
+                        {group.items.map((item) => (
+                          <button
+                            key={item.id}
+                            onClick={() => setActiveTab(item.id)}
+                            className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                              activeTab === item.id
+                                ? 'bg-blue-50 text-blue-700 font-medium border-l-2 border-blue-600'
+                                : 'text-gray-700 hover:bg-gray-50 border-l-2 border-transparent'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span>{item.label}</span>
+                              {item.shortcut && (
+                                <span className="text-[10px] text-gray-400">{item.shortcut}</span>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Top Bar - Global Date Range ONLY */}
           <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-            <h1 className="text-lg font-semibold text-gray-900">Finance & Accounting</h1>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                className="p-1.5 hover:bg-gray-100 rounded transition-colors"
+                title={sidebarCollapsed ? 'Show Menu' : 'Hide Menu'}
+              >
+                {sidebarCollapsed ? <Menu className="w-5 h-5 text-gray-600" /> : <X className="w-5 h-5 text-gray-600" />}
+              </button>
+              <h1 className="text-lg font-semibold text-gray-900">Finance & Accounting</h1>
+            </div>
 
             {/* SINGLE GLOBAL DATE RANGE */}
             <div className="flex items-center gap-3 bg-gray-50 px-4 py-2 rounded border border-gray-300">
