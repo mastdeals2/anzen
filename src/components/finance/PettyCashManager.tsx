@@ -616,6 +616,42 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
     }
   };
 
+  const exportToCSV = () => {
+    if (filteredTransactions.length === 0) {
+      alert('No transactions to export');
+      return;
+    }
+
+    const headers = ['Date', 'Number', 'Type', 'Category', 'Description', 'Amount', 'Paid To'];
+    const rows = filteredTransactions.map(tx => {
+      const category = tx.expense_category ? getCategoryInfo(tx.expense_category) : null;
+      return [
+        tx.transaction_date,
+        tx.transaction_number,
+        tx.transaction_type === 'withdraw' ? 'Withdrawal' : 'Expense',
+        category?.label || '',
+        tx.description,
+        tx.amount.toString(),
+        tx.paid_to || ''
+      ];
+    });
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `petty_cash_${startDate || 'all'}_to_${endDate || 'all'}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const viewTransaction = (transaction: PettyCashTransaction) => {
     setViewingTransaction(transaction);
     setViewModalOpen(true);
