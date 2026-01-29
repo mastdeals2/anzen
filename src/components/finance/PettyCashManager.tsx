@@ -598,20 +598,42 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this transaction?')) return;
+    if (!confirm('Are you sure you want to delete this transaction? This action cannot be undone.')) return;
 
     try {
+      // First delete associated documents from storage
+      const { data: docs } = await supabase
+        .from('petty_cash_documents')
+        .select('file_url')
+        .eq('petty_cash_transaction_id', id);
+
+      if (docs && docs.length > 0) {
+        for (const doc of docs) {
+          const fileName = doc.file_url.split('/').pop();
+          if (fileName) {
+            await supabase.storage
+              .from('petty-cash-receipts')
+              .remove([fileName]);
+          }
+        }
+      }
+
+      // Delete the transaction (documents will cascade delete)
       const { error } = await supabase
         .from('petty_cash_transactions')
         .delete()
         .eq('id', id);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Delete error details:', error);
+        throw error;
+      }
+
       alert('Transaction deleted successfully!');
       loadData();
     } catch (error: any) {
       console.error('Error deleting transaction:', error);
-      alert('Failed to delete transaction: ' + error.message);
+      alert('Failed to delete transaction: ' + (error.message || 'Unknown error'));
     }
   };
 
@@ -1199,19 +1221,24 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
         </form>
       </Modal>
 
-      <Modal isOpen={viewModalOpen} onClose={() => setViewModalOpen(false)} title="Petty Cash Transaction Details">
+      <Modal
+        isOpen={viewModalOpen}
+        onClose={() => setViewModalOpen(false)}
+        title="Petty Cash Receipt"
+        maxWidth="max-w-lg"
+      >
         {viewingTransaction && (
-          <div className="space-y-6">
-            {/* Header Section */}
-            <div className="bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg p-4 border border-blue-200">
+          <div className="space-y-3 text-sm">
+            {/* Compact Header Bar */}
+            <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-3 py-2 rounded -mt-1 -mx-1">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-blue-600 font-medium">Transaction Number</p>
-                  <p className="text-xl font-bold text-blue-900">{viewingTransaction.transaction_number}</p>
+                  <p className="text-xs opacity-90">Transaction #</p>
+                  <p className="text-base font-bold">{viewingTransaction.transaction_number}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm text-blue-600 font-medium">Date</p>
-                  <p className="text-lg font-semibold text-blue-900">
+                  <p className="text-xs opacity-90">Date</p>
+                  <p className="text-base font-semibold">
                     {new Date(viewingTransaction.transaction_date).toLocaleDateString('id-ID', {
                       day: '2-digit',
                       month: 'short',
@@ -1222,77 +1249,110 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
               </div>
             </div>
 
-            {/* Type and Amount */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                <p className="text-xs text-gray-500 font-medium uppercase mb-1">Transaction Type</p>
-                <div className="flex items-center gap-2">
+            {/* Compact 2-Column Grid */}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 py-2 border-b border-gray-200">
+              <div>
+                <p className="text-xs text-gray-500 mb-0.5">Type</p>
+                <div className="flex items-center gap-1">
                   {viewingTransaction.transaction_type === 'withdraw' ? (
                     <>
-                      <ArrowDownCircle className="h-5 w-5 text-blue-600" />
-                      <span className="text-lg font-semibold text-blue-900">Withdrawal</span>
+                      <ArrowDownCircle className="h-3.5 w-3.5 text-blue-600" />
+                      <span className="text-sm font-medium text-blue-900">Withdrawal</span>
                     </>
                   ) : (
                     <>
-                      <ArrowUpCircle className="h-5 w-5 text-red-600" />
-                      <span className="text-lg font-semibold text-red-900">Expense</span>
+                      <ArrowUpCircle className="h-3.5 w-3.5 text-red-600" />
+                      <span className="text-sm font-medium text-red-900">Expense</span>
                     </>
                   )}
                 </div>
               </div>
-              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                <p className="text-xs text-gray-500 font-medium uppercase mb-1">Amount</p>
-                <p className="text-2xl font-bold text-gray-900">
+              <div>
+                <p className="text-xs text-gray-500 mb-0.5">Amount</p>
+                <p className="text-lg font-bold text-gray-900">
                   Rp {Number(viewingTransaction.amount).toLocaleString('id-ID')}
                 </p>
               </div>
             </div>
 
-            {/* Category and Category Description */}
+            {/* Category */}
             {viewingTransaction.expense_category && (
-              <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
-                <p className="text-xs text-amber-600 font-medium uppercase mb-2">Expense Category</p>
-                <div className="flex items-center gap-2 mb-2">
+              <div className="py-2 border-b border-gray-200">
+                <p className="text-xs text-gray-500 mb-1">Category</p>
+                <div className="flex items-center gap-1.5">
                   {(() => {
                     const categoryInfo = getCategoryInfo(viewingTransaction.expense_category);
                     const Icon = categoryInfo?.icon;
                     return (
                       <>
-                        {Icon && <Icon className="h-5 w-5 text-amber-700" />}
-                        <span className="text-lg font-semibold text-amber-900">{categoryInfo?.label}</span>
+                        {Icon && <Icon className="h-4 w-4 text-amber-600" />}
+                        <span className="text-sm font-medium text-gray-900">{categoryInfo?.label}</span>
                       </>
                     );
                   })()}
                 </div>
-                <p className="text-sm text-amber-700">{getCategoryInfo(viewingTransaction.expense_category)?.description}</p>
               </div>
             )}
 
-            {/* Links Section */}
+            {/* Description */}
+            <div className="py-2 border-b border-gray-200">
+              <p className="text-xs text-gray-500 mb-1">Description</p>
+              <p className="text-sm text-gray-900">{viewingTransaction.description}</p>
+            </div>
+
+            {/* Payment Details - Compact Grid */}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 py-2 border-b border-gray-200">
+              {viewingTransaction.paid_to && (
+                <>
+                  <p className="text-xs text-gray-500">Paid To</p>
+                  <p className="text-sm font-medium text-gray-900">{viewingTransaction.paid_to}</p>
+                </>
+              )}
+              {viewingTransaction.paid_by_staff_name && (
+                <>
+                  <p className="text-xs text-gray-500">Paid By</p>
+                  <p className="text-sm font-medium text-gray-900">{viewingTransaction.paid_by_staff_name}</p>
+                </>
+              )}
+              {viewingTransaction.received_by_staff_name && (
+                <>
+                  <p className="text-xs text-gray-500">Received By</p>
+                  <p className="text-sm font-medium text-gray-900">{viewingTransaction.received_by_staff_name}</p>
+                </>
+              )}
+              {viewingTransaction.source && (
+                <>
+                  <p className="text-xs text-gray-500">Source</p>
+                  <p className="text-sm font-medium text-gray-900">{viewingTransaction.source}</p>
+                </>
+              )}
+            </div>
+
+            {/* Linked References - Compact */}
             {(viewingTransaction.import_containers || viewingTransaction.delivery_challans || viewingTransaction.bank_accounts) && (
-              <div className="space-y-2">
-                <p className="text-xs text-gray-500 font-medium uppercase">Linked References</p>
-                <div className="space-y-2">
+              <div className="py-2 border-b border-gray-200">
+                <p className="text-xs text-gray-500 mb-1.5">Linked To</p>
+                <div className="space-y-1">
                   {viewingTransaction.import_containers && (
-                    <div className="flex items-center gap-2 bg-purple-50 px-3 py-2 rounded-lg border border-purple-200">
-                      <Package className="h-4 w-4 text-purple-600" />
-                      <span className="text-sm font-medium text-purple-900">Container:</span>
-                      <span className="text-sm text-purple-700">{viewingTransaction.import_containers.container_ref}</span>
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <Package className="h-3.5 w-3.5 text-purple-600" />
+                      <span className="text-gray-600">Container:</span>
+                      <span className="font-medium text-gray-900">{viewingTransaction.import_containers.container_ref}</span>
                     </div>
                   )}
                   {viewingTransaction.delivery_challans && (
-                    <div className="flex items-center gap-2 bg-green-50 px-3 py-2 rounded-lg border border-green-200">
-                      <Truck className="h-4 w-4 text-green-600" />
-                      <span className="text-sm font-medium text-green-900">Delivery Challan:</span>
-                      <span className="text-sm text-green-700">{viewingTransaction.delivery_challans.challan_number}</span>
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <Truck className="h-3.5 w-3.5 text-green-600" />
+                      <span className="text-gray-600">Challan:</span>
+                      <span className="font-medium text-gray-900">{viewingTransaction.delivery_challans.challan_number}</span>
                     </div>
                   )}
                   {viewingTransaction.bank_accounts && (
-                    <div className="flex items-center gap-2 bg-blue-50 px-3 py-2 rounded-lg border border-blue-200">
-                      <Building2 className="h-4 w-4 text-blue-600" />
-                      <span className="text-sm font-medium text-blue-900">Bank:</span>
-                      <span className="text-sm text-blue-700">
-                        {viewingTransaction.bank_accounts.alias || viewingTransaction.bank_accounts.bank_name} ({viewingTransaction.bank_accounts.currency})
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <Building2 className="h-3.5 w-3.5 text-blue-600" />
+                      <span className="text-gray-600">Bank:</span>
+                      <span className="font-medium text-gray-900">
+                        {viewingTransaction.bank_accounts.alias || viewingTransaction.bank_accounts.bank_name}
                       </span>
                     </div>
                   )}
@@ -1300,74 +1360,42 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
               </div>
             )}
 
-            {/* Description */}
-            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-              <p className="text-xs text-gray-500 font-medium uppercase mb-2">Description</p>
-              <p className="text-sm text-gray-900 leading-relaxed">{viewingTransaction.description}</p>
-            </div>
-
-            {/* Payment Details */}
-            <div className="grid grid-cols-2 gap-4">
-              {viewingTransaction.paid_to && (
-                <div>
-                  <p className="text-xs text-gray-500 font-medium uppercase mb-1">Paid To</p>
-                  <p className="text-sm font-semibold text-gray-900">{viewingTransaction.paid_to}</p>
-                </div>
-              )}
-              {viewingTransaction.paid_by_staff_name && (
-                <div>
-                  <p className="text-xs text-gray-500 font-medium uppercase mb-1">Paid By Staff</p>
-                  <p className="text-sm font-semibold text-gray-900">{viewingTransaction.paid_by_staff_name}</p>
-                </div>
-              )}
-              {viewingTransaction.received_by_staff_name && (
-                <div>
-                  <p className="text-xs text-gray-500 font-medium uppercase mb-1">Received By Staff</p>
-                  <p className="text-sm font-semibold text-gray-900">{viewingTransaction.received_by_staff_name}</p>
-                </div>
-              )}
-              {viewingTransaction.source && (
-                <div>
-                  <p className="text-xs text-gray-500 font-medium uppercase mb-1">Source</p>
-                  <p className="text-sm font-semibold text-gray-900">{viewingTransaction.source}</p>
-                </div>
-              )}
-            </div>
-
-            {/* Attached Documents */}
+            {/* Attached Documents with Thumbnails */}
             {viewingTransaction.petty_cash_documents && viewingTransaction.petty_cash_documents.length > 0 && (
-              <div>
-                <p className="text-xs text-gray-500 font-medium uppercase mb-3">Attached Documents ({viewingTransaction.petty_cash_documents.length})</p>
-                <div className="space-y-2">
+              <div className="pt-2">
+                <p className="text-xs text-gray-500 mb-2">Attachments ({viewingTransaction.petty_cash_documents.length})</p>
+                <div className="grid grid-cols-2 gap-2">
                   {viewingTransaction.petty_cash_documents.map((doc) => (
-                    <div key={doc.id} className="flex items-center justify-between bg-gradient-to-r from-gray-50 to-gray-100 px-4 py-3 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
-                      <div className="flex items-center gap-3">
-                        {doc.file_type.startsWith('image/') ? (
-                          <div className="bg-blue-100 p-2 rounded-lg">
-                            <Image className="h-5 w-5 text-blue-600" />
+                    <a
+                      key={doc.id}
+                      href={doc.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group relative border border-gray-200 rounded overflow-hidden hover:border-blue-500 transition-colors"
+                    >
+                      {doc.file_type.startsWith('image/') ? (
+                        <div className="aspect-square bg-gray-100 relative">
+                          <img
+                            src={doc.file_url}
+                            alt={doc.file_name}
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-opacity flex items-center justify-center">
+                            <ExternalLink className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                           </div>
-                        ) : (
-                          <div className="bg-red-100 p-2 rounded-lg">
-                            <FileText className="h-5 w-5 text-red-600" />
-                          </div>
-                        )}
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{doc.file_name}</p>
-                          {doc.file_size && (
-                            <p className="text-xs text-gray-500">{(doc.file_size / 1024).toFixed(1)} KB</p>
-                          )}
                         </div>
-                      </div>
-                      <a
-                        href={doc.file_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                        Open
-                      </a>
-                    </div>
+                      ) : (
+                        <div className="aspect-square bg-red-50 flex flex-col items-center justify-center p-3">
+                          <FileText className="h-8 w-8 text-red-600 mb-2" />
+                          <p className="text-xs text-center text-gray-700 line-clamp-2">{doc.file_name}</p>
+                        </div>
+                      )}
+                      {doc.file_size && (
+                        <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white text-xs px-2 py-0.5">
+                          {(doc.file_size / 1024).toFixed(0)} KB
+                        </div>
+                      )}
+                    </a>
                   ))}
                 </div>
               </div>
