@@ -308,6 +308,7 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
   const [cashBalance, setCashBalance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<File[]>([]);
+  const [existingDocuments, setExistingDocuments] = useState<PettyCashDocument[]>([]);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [showPasteHint, setShowPasteHint] = useState(false);
   const [filterType, setFilterType] = useState<'all' | 'import' | 'sales' | 'staff' | 'operations' | 'admin' | 'assets'>('all');
@@ -459,6 +460,34 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
     setUploadingFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  const deleteExistingDocument = async (documentId: string) => {
+    if (!confirm('Are you sure you want to delete this document?')) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('petty_cash_documents')
+        .delete()
+        .eq('id', documentId);
+
+      if (error) throw error;
+
+      setExistingDocuments(prev => prev.filter(doc => doc.id !== documentId));
+      alert('Document deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      alert('Failed to delete document');
+    }
+  };
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setEditingTransaction(null);
+    setExistingDocuments([]);
+    setUploadingFiles([]);
+  };
+
   const openAddModal = () => {
     setEditingTransaction(null);
     setFormData({
@@ -476,6 +505,7 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
       import_container_id: '',
       delivery_challan_id: '',
     });
+    setExistingDocuments([]);
     setUploadingFiles([]);
     setModalOpen(true);
   };
@@ -497,6 +527,7 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
       import_container_id: transaction.import_container_id || '',
       delivery_challan_id: transaction.delivery_challan_id || '',
     });
+    setExistingDocuments(transaction.petty_cash_documents || []);
     setUploadingFiles([]);
     setModalOpen(true);
   };
@@ -597,7 +628,7 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
       }
 
       alert(editingTransaction ? 'Petty cash transaction updated successfully!' : 'Petty cash transaction added successfully!');
-      setModalOpen(false);
+      closeModal();
       loadData();
     } catch (error: any) {
       console.error('Error saving petty cash transaction:', error);
@@ -1011,7 +1042,7 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
         </table>
       </div>
 
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={editingTransaction ? 'Edit Transaction' : 'Add Petty Cash Transaction'}>
+      <Modal isOpen={modalOpen} onClose={closeModal} title={editingTransaction ? 'Edit Transaction' : 'Add Petty Cash Transaction'}>
         <form onSubmit={handleSubmit} className="space-y-4" onPaste={handlePaste}>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Transaction Type</label>
@@ -1214,9 +1245,62 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
             />
           </div>
 
+          {/* Existing Documents (Edit Mode) */}
+          {editingTransaction && existingDocuments.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Existing Documents ({existingDocuments.length})
+              </label>
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                {existingDocuments.map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="group relative border border-gray-200 rounded-lg overflow-hidden hover:border-red-500 transition-colors"
+                  >
+                    {doc.file_type === 'photo' ? (
+                      <div className="aspect-square bg-gray-100 relative">
+                        <img
+                          src={doc.file_url}
+                          alt={doc.file_name}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    ) : (
+                      <div className="aspect-square bg-red-50 flex flex-col items-center justify-center p-3">
+                        <FileText className="h-10 w-10 text-red-600 mb-2" />
+                        <p className="text-xs text-center text-gray-700 line-clamp-2 px-2">{doc.file_name}</p>
+                      </div>
+                    )}
+                    <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white text-xs px-2 py-1.5 flex items-center justify-between">
+                      <span>{(doc.file_size / 1024).toFixed(0)} KB</span>
+                      <div className="flex gap-1">
+                        <a
+                          href={doc.file_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1 hover:bg-white hover:bg-opacity-20 rounded"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => deleteExistingDocument(doc.id)}
+                          className="p-1 hover:bg-red-500 rounded"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Upload Documents/Receipts
+              {editingTransaction ? 'Upload Additional Documents/Receipts' : 'Upload Documents/Receipts'}
             </label>
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
               <input
@@ -1275,7 +1359,7 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
           <div className="flex justify-end gap-3 pt-4">
             <button
               type="button"
-              onClick={() => setModalOpen(false)}
+              onClick={closeModal}
               className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
             >
               Cancel
