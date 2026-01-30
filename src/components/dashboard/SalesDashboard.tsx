@@ -2,17 +2,17 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigation } from '../../contexts/NavigationContext';
-import { DashboardWidget } from './DashboardWidget';
-import { TasksSummaryWidget } from './TasksSummaryWidget';
 import {
-  TrendingUp,
+  Bell,
+  CheckCircle2,
+  Clock,
   FileText,
-  Truck,
-  AlertCircle,
   Users,
-  ClipboardList,
-  Calendar,
-  DollarSign,
+  TrendingUp,
+  Package,
+  Eye,
+  EyeOff,
+  AlertCircle,
 } from 'lucide-react';
 
 interface SalesData {
@@ -40,6 +40,7 @@ export function SalesDashboard() {
   const { setCurrentPage } = useNavigation();
   const [data, setData] = useState<SalesData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showFinancials, setShowFinancials] = useState(false);
 
   useEffect(() => {
     if (profile?.id) {
@@ -71,178 +72,214 @@ export function SalesDashboard() {
     })}`;
   };
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-sm text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const totalUrgent = (data?.overdue_actions || 0) + (data?.pending_sales_orders || 0);
+  const totalWork = (data?.followups_due || 0) + (data?.pending_delivery_challans || 0);
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Sales Dashboard</h1>
-        <p className="text-gray-600 mt-1">Sales performance and pipeline overview</p>
+    <div className="space-y-5 max-w-7xl">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Sales Dashboard</h1>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+          </p>
+        </div>
+        <button
+          onClick={() => setShowFinancials(!showFinancials)}
+          className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+        >
+          {showFinancials ? (
+            <>
+              <EyeOff className="w-3.5 h-3.5" />
+              Hide Amounts
+            </>
+          ) : (
+            <>
+              <Eye className="w-3.5 h-3.5" />
+              Show Amounts
+            </>
+          )}
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <DashboardWidget
-          title="Sales Today"
-          value={data ? formatCurrency(data.sales_today) : '-'}
-          subtitle={`${data?.sales_today_count || 0} invoices`}
-          icon={DollarSign}
-          color="green"
-          loading={loading}
-          onClick={() => setCurrentPage('sales')}
-        />
-
-        <DashboardWidget
-          title="Pending Sales Orders"
-          value={data?.pending_sales_orders || 0}
-          subtitle="Awaiting approval"
-          icon={ClipboardList}
-          color="yellow"
-          loading={loading}
-          onClick={() => setCurrentPage('sales-orders')}
-        />
-
-        <DashboardWidget
-          title="Pending Quotations"
-          value={data?.pending_quotations || 0}
-          subtitle="Awaiting customer response"
-          icon={FileText}
-          color="blue"
-          loading={loading}
-          onClick={() => setCurrentPage('crm')}
-        />
-
-        <DashboardWidget
-          title="Pending DCs"
-          value={data?.pending_delivery_challans || 0}
-          subtitle="Awaiting approval"
-          icon={Truck}
-          color="purple"
-          loading={loading}
-          onClick={() => setCurrentPage('delivery-challan')}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <DashboardWidget
-          title="Unpaid Invoices"
-          value={data?.unpaid_invoices_count || 0}
-          subtitle={data ? formatCurrency(data.unpaid_invoices_amount) : '-'}
-          icon={AlertCircle}
-          color="orange"
-          loading={loading}
-          onClick={() => setCurrentPage('sales')}
-        />
-
-        <DashboardWidget
-          title="Follow-ups Due"
-          value={data?.followups_due || 0}
-          subtitle="Today and overdue"
-          icon={Calendar}
-          color="red"
-          loading={loading}
-          onClick={() => setCurrentPage('crm')}
-        />
-
-        <DashboardWidget
-          title="Overdue Actions"
-          value={data?.overdue_actions || 0}
-          subtitle="Customer actions needed"
-          icon={AlertCircle}
-          color="red"
-          loading={loading}
-          onClick={() => setCurrentPage('crm')}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <TasksSummaryWidget />
+      {/* ATTENTION REQUIRED */}
+      <div className={`bg-white rounded-lg border-2 ${totalUrgent > 0 ? 'border-red-500' : 'border-gray-200'} p-5`}>
+        <div className="flex items-center gap-2 mb-4">
+          <Bell className={`w-5 h-5 ${totalUrgent > 0 ? 'text-red-600' : 'text-gray-400'}`} />
+          <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wide">Attention Required</h2>
+          {totalUrgent > 0 && (
+            <span className="ml-auto px-2 py-0.5 text-xs font-bold text-white bg-red-600 rounded-full">
+              {totalUrgent}
+            </span>
+          )}
         </div>
 
-        <div className="space-y-6">
-          <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Users className="w-5 h-5 text-blue-600" />
-              <h3 className="text-lg font-semibold text-gray-900">Top Customers</h3>
-            </div>
-
-            {data && data.top_customers && data.top_customers.length > 0 ? (
-              <div className="space-y-3">
-                {data.top_customers.map((customer, index) => (
-                  <div key={index} className="flex items-center justify-between">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">
-                        {customer.company_name}
-                      </p>
-                    </div>
-                    <p className="text-sm font-semibold text-blue-600 ml-2">
-                      {formatCurrency(customer.revenue)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500 text-center py-4">
-                No sales this month yet
-              </p>
-            )}
+        {totalUrgent === 0 ? (
+          <div className="text-center py-8">
+            <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-2" />
+            <p className="text-sm font-medium text-gray-700">All Clear</p>
+            <p className="text-xs text-gray-500 mt-1">No urgent items require attention</p>
           </div>
-
-          <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
-
-            <div className="space-y-3">
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {data && data.overdue_actions > 0 && (
               <button
                 onClick={() => setCurrentPage('crm')}
-                className="w-full p-3 bg-blue-50 hover:bg-blue-100 rounded-lg transition text-left border border-blue-200"
+                className="text-left p-3 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition"
               >
-                <div className="flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-blue-600" />
-                  <div>
-                    <p className="font-medium text-blue-900">New Inquiry</p>
-                    <p className="text-xs text-blue-700">Create customer inquiry</p>
-                  </div>
+                <div className="flex items-center gap-2 mb-1">
+                  <AlertCircle className="w-4 h-4 text-red-600" />
+                  <span className="text-xs font-semibold text-red-900">Overdue Actions</span>
                 </div>
+                <p className="text-2xl font-bold text-red-600">{data.overdue_actions}</p>
+                <p className="text-xs text-red-700 mt-1">Past deadline</p>
               </button>
+            )}
 
+            {data && data.pending_sales_orders > 0 && (
               <button
                 onClick={() => setCurrentPage('sales-orders')}
-                className="w-full p-3 bg-green-50 hover:bg-green-100 rounded-lg transition text-left border border-green-200"
+                className="text-left p-3 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 transition"
               >
-                <div className="flex items-center gap-2">
-                  <ClipboardList className="w-5 h-5 text-green-600" />
-                  <div>
-                    <p className="font-medium text-green-900">New Sales Order</p>
-                    <p className="text-xs text-green-700">Create purchase order</p>
-                  </div>
+                <div className="flex items-center gap-2 mb-1">
+                  <FileText className="w-4 h-4 text-orange-600" />
+                  <span className="text-xs font-semibold text-orange-900">Pending Orders</span>
                 </div>
+                <p className="text-2xl font-bold text-orange-600">{data.pending_sales_orders}</p>
+                <p className="text-xs text-orange-700 mt-1">Awaiting approval</p>
               </button>
+            )}
 
+            {data && data.unpaid_invoices_count > 0 && (
               <button
                 onClick={() => setCurrentPage('sales')}
-                className="w-full p-3 bg-purple-50 hover:bg-purple-100 rounded-lg transition text-left border border-purple-200"
+                className="text-left p-3 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 transition"
               >
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5 text-purple-600" />
-                  <div>
-                    <p className="font-medium text-purple-900">View All Invoices</p>
-                    <p className="text-xs text-purple-700">Sales invoice list</p>
-                  </div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Clock className="w-4 h-4 text-orange-600" />
+                  <span className="text-xs font-semibold text-orange-900">Unpaid Invoices</span>
                 </div>
+                <p className="text-2xl font-bold text-orange-600">{data.unpaid_invoices_count}</p>
+                {showFinancials && (
+                  <p className="text-xs text-orange-700 mt-1">{formatCurrency(data.unpaid_invoices_amount)}</p>
+                )}
               </button>
-
-              <button
-                onClick={() => setCurrentPage('crm')}
-                className="w-full p-3 bg-orange-50 hover:bg-orange-100 rounded-lg transition text-left border border-orange-200"
-              >
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-5 h-5 text-orange-600" />
-                  <div>
-                    <p className="font-medium text-orange-900">CRM Pipeline</p>
-                    <p className="text-xs text-orange-700">Manage opportunities</p>
-                  </div>
-                </div>
-              </button>
-            </div>
+            )}
           </div>
+        )}
+      </div>
+
+      {/* MY WORK TODAY */}
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Clock className="w-5 h-5 text-gray-600" />
+          <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wide">My Work Today</h2>
+          {totalWork > 0 && (
+            <span className="ml-auto px-2 py-0.5 text-xs font-semibold text-blue-600 bg-blue-100 rounded-full">
+              {totalWork}
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Follow-ups Due */}
+          {data && data.followups_due > 0 && (
+            <button
+              onClick={() => setCurrentPage('crm')}
+              className="text-left p-4 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 transition"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-blue-900">Customer Follow-ups</span>
+                <span className="text-2xl font-bold text-blue-600">{data.followups_due}</span>
+              </div>
+              <p className="text-xs text-blue-700">Scheduled for today</p>
+            </button>
+          )}
+
+          {/* Pending Delivery Challans */}
+          {data && data.pending_delivery_challans > 0 && (
+            <button
+              onClick={() => setCurrentPage('delivery-challan')}
+              className="text-left p-4 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 transition"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-blue-900">Delivery Challans</span>
+                <span className="text-2xl font-bold text-blue-600">{data.pending_delivery_challans}</span>
+              </div>
+              <p className="text-xs text-blue-700">Ready for processing</p>
+            </button>
+          )}
+
+          {totalWork === 0 && (
+            <div className="col-span-2 text-center py-6">
+              <CheckCircle2 className="w-10 h-10 text-green-500 mx-auto mb-2" />
+              <p className="text-xs text-gray-600">No pending work items</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* SYSTEM OVERVIEW */}
+      <div className="bg-gray-50 rounded-lg border border-gray-200 p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <TrendingUp className="w-4 h-4 text-gray-500" />
+          <h2 className="text-xs font-bold text-gray-700 uppercase tracking-wide">Performance Overview</h2>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {/* Sales Today */}
+          <button onClick={() => setCurrentPage('sales')} className="text-left p-3 bg-white rounded border border-gray-200 hover:shadow-sm transition">
+            <p className="text-xs text-gray-500 mb-1">Sales Today</p>
+            {showFinancials ? (
+              <p className="text-sm font-bold text-gray-900">{data ? formatCurrency(data.sales_today) : '-'}</p>
+            ) : (
+              <p className="text-sm font-bold text-gray-400">• • • • •</p>
+            )}
+            <p className="text-xs text-gray-500 mt-1">{data?.sales_today_count || 0} invoices</p>
+          </button>
+
+          {/* Top Customers */}
+          {data && data.top_customers && data.top_customers.length > 0 && (
+            <button onClick={() => setCurrentPage('customers')} className="text-left p-3 bg-white rounded border border-gray-200 hover:shadow-sm transition">
+              <p className="text-xs text-gray-500 mb-1">Top Customer</p>
+              <p className="text-sm font-bold text-gray-900 truncate">{data.top_customers[0].company_name}</p>
+              {showFinancials && (
+                <p className="text-xs text-gray-500 mt-1">{formatCurrency(data.top_customers[0].revenue)}</p>
+              )}
+            </button>
+          )}
+
+          {/* Pipeline Summary */}
+          {data && data.pipeline_summary && data.pipeline_summary.length > 0 && (
+            <button onClick={() => setCurrentPage('crm')} className="text-left p-3 bg-white rounded border border-gray-200 hover:shadow-sm transition">
+              <p className="text-xs text-gray-500 mb-1">CRM Pipeline</p>
+              <p className="text-sm font-bold text-gray-900">
+                {data.pipeline_summary.reduce((sum, item) => sum + item.count, 0)}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">Active inquiries</p>
+            </button>
+          )}
+
+          {/* Quotations */}
+          {data && (
+            <button onClick={() => setCurrentPage('crm')} className="text-left p-3 bg-white rounded border border-gray-200 hover:shadow-sm transition">
+              <p className="text-xs text-gray-500 mb-1">Quotations</p>
+              <p className="text-sm font-bold text-gray-900">{data.pending_quotations || 0}</p>
+              <p className="text-xs text-gray-500 mt-1">Pending</p>
+            </button>
+          )}
         </div>
       </div>
     </div>
