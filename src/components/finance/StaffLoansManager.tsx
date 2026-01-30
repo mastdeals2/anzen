@@ -1,35 +1,33 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Plus, Search, X, DollarSign, UserCircle, Calendar } from 'lucide-react';
+import { Plus, Search, UserCircle, ExternalLink, TrendingUp, TrendingDown } from 'lucide-react';
 import { Modal } from '../Modal';
 import { useAuth } from '../../contexts/AuthContext';
 
-interface StaffLoan {
+interface StaffMember {
   id: string;
-  loan_number: string;
   staff_name: string;
-  loan_amount: number;
-  loan_date: string;
-  due_date: string | null;
-  status: string;
-  amount_repaid: number;
-  balance: number;
-  description: string | null;
-  payment_method: string;
+  employee_id: string | null;
+  coa_account_id: string;
+  department: string | null;
+  designation: string | null;
+  phone: string | null;
+  email: string | null;
+  is_active: boolean;
 }
 
-interface StaffRepayment {
-  id: string;
-  repayment_number: string;
-  repayment_date: string;
-  amount: number;
-  payment_method: string;
-  description: string | null;
+interface StaffBalance {
+  staff_name: string;
+  employee_id: string | null;
+  account_code: string;
+  outstanding_balance: number;
+  last_transaction_date: string;
 }
 
-interface StaffLedgerEntry {
-  transaction_date: string;
-  transaction_type: string;
+interface LedgerEntry {
+  entry_date: string;
+  entry_number: string;
+  voucher_type: string;
   reference_number: string;
   description: string;
   debit: number;
@@ -37,48 +35,44 @@ interface StaffLedgerEntry {
   balance: number;
 }
 
-interface StaffBalance {
-  staff_name: string;
-  total_loans: number;
-  total_repayments: number;
-  total_advances: number;
-  outstanding_balance: number;
-  last_transaction_date: string;
+interface BankAccount {
+  id: string;
+  bank_name: string;
+  account_number: string;
+  currency: string;
+  coa_id: string;
 }
 
 export function StaffLoansManager() {
   const { profile } = useAuth();
-  const [loans, setLoans] = useState<StaffLoan[]>([]);
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [balances, setBalances] = useState<StaffBalance[]>([]);
-  const [selectedLoan, setSelectedLoan] = useState<StaffLoan | null>(null);
-  const [repayments, setRepayments] = useState<StaffRepayment[]>([]);
-  const [ledgerEntries, setLedgerEntries] = useState<StaffLedgerEntry[]>([]);
+  const [selectedStaff, setSelectedStaff] = useState<StaffMember | null>(null);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [modalOpen, setModalOpen] = useState(false);
+  const [newStaffModalOpen, setNewStaffModalOpen] = useState(false);
+  const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
   const [repaymentModalOpen, setRepaymentModalOpen] = useState(false);
   const [ledgerModalOpen, setLedgerModalOpen] = useState(false);
-  const [selectedStaffName, setSelectedStaffName] = useState('');
 
-  const [formData, setFormData] = useState({
+  const [newStaffData, setNewStaffData] = useState({
     staff_name: '',
-    loan_amount: '',
-    loan_date: new Date().toISOString().split('T')[0],
-    due_date: '',
-    description: '',
-    payment_method: 'cash',
-    bank_account_id: '',
+    employee_id: '',
+    department: '',
+    designation: '',
+    phone: '',
+    email: '',
   });
 
-  const [repaymentData, setRepaymentData] = useState({
+  const [transactionData, setTransactionData] = useState({
     amount: '',
-    repayment_date: new Date().toISOString().split('T')[0],
+    transaction_date: new Date().toISOString().split('T')[0],
     payment_method: 'cash',
     bank_account_id: '',
     description: '',
   });
-
-  const [bankAccounts, setBankAccounts] = useState<any[]>([]);
 
   useEffect(() => {
     loadData();
@@ -86,19 +80,16 @@ export function StaffLoansManager() {
 
   const loadData = async () => {
     try {
-      const [loansRes, balancesRes, banksRes] = await Promise.all([
-        supabase
-          .from('staff_loans')
-          .select('*')
-          .order('loan_date', { ascending: false }),
-        supabase.rpc('get_staff_outstanding_balances'),
+      const [staffRes, balancesRes, banksRes] = await Promise.all([
+        supabase.from('staff_members').select('*').eq('is_active', true).order('staff_name'),
+        supabase.rpc('get_staff_outstanding_summary'),
         supabase.from('bank_accounts').select('*').eq('is_active', true),
       ]);
 
-      if (loansRes.error) throw loansRes.error;
+      if (staffRes.error) throw staffRes.error;
       if (banksRes.error) throw banksRes.error;
 
-      setLoans(loansRes.data || []);
+      setStaffMembers(staffRes.data || []);
       setBalances(balancesRes.data || []);
       setBankAccounts(banksRes.data || []);
     } catch (error) {
@@ -108,90 +99,249 @@ export function StaffLoansManager() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const { error } = await supabase.from('staff_loans').insert([
-        {
-          ...formData,
-          loan_amount: parseFloat(formData.loan_amount),
-          bank_account_id: formData.payment_method === 'bank' ? formData.bank_account_id : null,
-          created_by: profile?.id,
-        },
-      ]);
+      // Create staff account in COA first
+      const { data: coaId, error: coaError } = await supabase.rpc('create_staff_account', {
+        p_staff_name: newStaffData.staff_name,
+        p_employee_id: newStaffData.employee_id || null,
+      });
 
-      if (error) throw error;
+      if (coaError) throw coaError;
 
-      setModalOpen(false);
-      setFormData({
+      // Update additional staff details
+      await supabase
+        .from('staff_members')
+        .update({
+          department: newStaffData.department || null,
+          designation: newStaffData.designation || null,
+          phone: newStaffData.phone || null,
+          email: newStaffData.email || null,
+        })
+        .eq('coa_account_id', coaId);
+
+      setNewStaffModalOpen(false);
+      setNewStaffData({
         staff_name: '',
-        loan_amount: '',
-        loan_date: new Date().toISOString().split('T')[0],
-        due_date: '',
-        description: '',
-        payment_method: 'cash',
-        bank_account_id: '',
+        employee_id: '',
+        department: '',
+        designation: '',
+        phone: '',
+        email: '',
       });
       loadData();
+      alert('Staff member created successfully');
     } catch (error: any) {
       alert('Error: ' + error.message);
     }
   };
 
-  const handleRepayment = async (e: React.FormEvent) => {
+  const handleGiveAdvance = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedLoan) return;
+    if (!selectedStaff) return;
 
     try {
-      const { error } = await supabase.from('staff_loan_repayments').insert([
-        {
-          loan_id: selectedLoan.id,
-          amount: parseFloat(repaymentData.amount),
-          repayment_date: repaymentData.repayment_date,
-          payment_method: repaymentData.payment_method,
-          bank_account_id: repaymentData.payment_method === 'bank' ? repaymentData.bank_account_id : null,
-          description: repaymentData.description,
-          created_by: profile?.id,
-        },
-      ]);
+      const amount = parseFloat(transactionData.amount);
 
-      if (error) throw error;
+      // Get bank account COA ID if payment is via bank
+      let bankCoaId = null;
+      if (transactionData.payment_method === 'bank' && transactionData.bank_account_id) {
+        const { data: bankData } = await supabase
+          .from('bank_accounts')
+          .select('coa_id')
+          .eq('id', transactionData.bank_account_id)
+          .single();
+
+        if (bankData) bankCoaId = bankData.coa_id;
+      } else {
+        // Use petty cash account
+        const { data: pettyCashData } = await supabase
+          .from('chart_of_accounts')
+          .select('id')
+          .eq('code', '1102')
+          .single();
+
+        if (pettyCashData) bankCoaId = pettyCashData.id;
+      }
+
+      if (!bankCoaId) {
+        throw new Error('Payment account not found');
+      }
+
+      // Create payment voucher (Dr Staff, Cr Bank/Cash)
+      const entryNumber = await generateEntryNumber(transactionData.transaction_date);
+
+      const { data: journalEntry, error: jeError } = await supabase
+        .from('journal_entries')
+        .insert({
+          entry_number: entryNumber,
+          entry_date: transactionData.transaction_date,
+          source_module: 'payment',
+          reference_number: `PAY-${entryNumber.split('-')[1]}`,
+          description: `Staff advance given to ${selectedStaff.staff_name}: ${transactionData.description}`,
+          is_posted: true,
+          created_by: profile?.id,
+          posted_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (jeError) throw jeError;
+
+      // Create journal lines
+      const lines = [
+        {
+          journal_entry_id: journalEntry.id,
+          line_number: 1,
+          account_id: selectedStaff.coa_account_id, // Dr Staff
+          debit: amount,
+          credit: 0,
+          description: `Advance to ${selectedStaff.staff_name}`,
+        },
+        {
+          journal_entry_id: journalEntry.id,
+          line_number: 2,
+          account_id: bankCoaId, // Cr Bank/Cash
+          debit: 0,
+          credit: amount,
+          description: transactionData.payment_method === 'bank' ? 'Bank payment' : 'Cash payment',
+        },
+      ];
+
+      const { error: linesError } = await supabase.from('journal_entry_lines').insert(lines);
+
+      if (linesError) throw linesError;
+
+      setAdvanceModalOpen(false);
+      setTransactionData({
+        amount: '',
+        transaction_date: new Date().toISOString().split('T')[0],
+        payment_method: 'cash',
+        bank_account_id: '',
+        description: '',
+      });
+      loadData();
+      alert('Staff advance recorded successfully via Payment Voucher');
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    }
+  };
+
+  const handleRecordRepayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedStaff) return;
+
+    try {
+      const amount = parseFloat(transactionData.amount);
+
+      // Get bank account COA ID if payment is via bank
+      let bankCoaId = null;
+      if (transactionData.payment_method === 'bank' && transactionData.bank_account_id) {
+        const { data: bankData } = await supabase
+          .from('bank_accounts')
+          .select('coa_id')
+          .eq('id', transactionData.bank_account_id)
+          .single();
+
+        if (bankData) bankCoaId = bankData.coa_id;
+      } else {
+        // Use petty cash account
+        const { data: pettyCashData } = await supabase
+          .from('chart_of_accounts')
+          .select('id')
+          .eq('code', '1102')
+          .single();
+
+        if (pettyCashData) bankCoaId = pettyCashData.id;
+      }
+
+      if (!bankCoaId) {
+        throw new Error('Payment account not found');
+      }
+
+      // Create receipt voucher (Dr Bank/Cash, Cr Staff)
+      const entryNumber = await generateEntryNumber(transactionData.transaction_date);
+
+      const { data: journalEntry, error: jeError } = await supabase
+        .from('journal_entries')
+        .insert({
+          entry_number: entryNumber,
+          entry_date: transactionData.transaction_date,
+          source_module: 'receipt',
+          reference_number: `REC-${entryNumber.split('-')[1]}`,
+          description: `Staff advance repayment from ${selectedStaff.staff_name}: ${transactionData.description}`,
+          is_posted: true,
+          created_by: profile?.id,
+          posted_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (jeError) throw jeError;
+
+      // Create journal lines
+      const lines = [
+        {
+          journal_entry_id: journalEntry.id,
+          line_number: 1,
+          account_id: bankCoaId, // Dr Bank/Cash
+          debit: amount,
+          credit: 0,
+          description: transactionData.payment_method === 'bank' ? 'Bank receipt' : 'Cash receipt',
+        },
+        {
+          journal_entry_id: journalEntry.id,
+          line_number: 2,
+          account_id: selectedStaff.coa_account_id, // Cr Staff
+          debit: 0,
+          credit: amount,
+          description: `Repayment from ${selectedStaff.staff_name}`,
+        },
+      ];
+
+      const { error: linesError } = await supabase.from('journal_entry_lines').insert(lines);
+
+      if (linesError) throw linesError;
 
       setRepaymentModalOpen(false);
-      setRepaymentData({
+      setTransactionData({
         amount: '',
-        repayment_date: new Date().toISOString().split('T')[0],
+        transaction_date: new Date().toISOString().split('T')[0],
         payment_method: 'cash',
         bank_account_id: '',
         description: '',
       });
       loadData();
+      alert('Staff repayment recorded successfully via Receipt Voucher');
     } catch (error: any) {
       alert('Error: ' + error.message);
     }
   };
 
-  const viewRepayments = async (loan: StaffLoan) => {
-    setSelectedLoan(loan);
-    try {
-      const { data, error } = await supabase
-        .from('staff_loan_repayments')
-        .select('*')
-        .eq('loan_id', loan.id)
-        .order('repayment_date', { ascending: false });
+  const generateEntryNumber = async (date: string): Promise<string> => {
+    const { data, error } = await supabase
+      .from('journal_entries')
+      .select('entry_number')
+      .eq('entry_date', date)
+      .order('entry_number', { ascending: false })
+      .limit(1);
 
-      if (error) throw error;
-      setRepayments(data || []);
-    } catch (error) {
-      console.error('Error loading repayments:', error);
+    if (error) throw error;
+
+    if (data && data.length > 0) {
+      const lastNum = parseInt(data[0].entry_number.split('-').pop() || '0');
+      return `JE-${date.replace(/-/g, '')}-${String(lastNum + 1).padStart(4, '0')}`;
     }
+
+    return `JE-${date.replace(/-/g, '')}-0001`;
   };
 
-  const viewLedger = async (staffName: string) => {
-    setSelectedStaffName(staffName);
+  const viewLedger = async (staff: StaffMember) => {
+    setSelectedStaff(staff);
     try {
-      const { data, error } = await supabase.rpc('get_staff_ledger', {
-        p_staff_name: staffName,
+      const { data, error } = await supabase.rpc('get_staff_ledger_from_journal', {
+        p_staff_name: staff.staff_name,
         p_start_date: null,
         p_end_date: new Date().toISOString().split('T')[0],
       });
@@ -204,24 +354,19 @@ export function StaffLoansManager() {
     }
   };
 
-  const filteredLoans = loans.filter(
-    (l) =>
-      l.staff_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      l.loan_number.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'active':
-        return 'bg-yellow-100 text-yellow-700';
-      case 'partial':
-        return 'bg-blue-100 text-blue-700';
-      case 'repaid':
-        return 'bg-green-100 text-green-700';
-      default:
-        return 'bg-gray-100 text-gray-700';
-    }
+  const navigateToPartyLedger = (staffName: string) => {
+    // This will be handled by parent component
+    alert(`Navigate to Party Ledger for ${staffName}\n\nStaff accounts appear in Party Ledger under account codes 116x`);
   };
+
+  const navigateToBankRecon = () => {
+    alert('Navigate to Bank Reconciliation\n\nAll staff advance payments via bank are automatically available in Bank Reconciliation for matching');
+  };
+
+  const filteredStaff = staffMembers.filter((s) =>
+    s.staff_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (s.employee_id && s.employee_id.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
 
   if (loading) {
     return (
@@ -233,39 +378,72 @@ export function StaffLoansManager() {
 
   return (
     <div className="space-y-6">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <h3 className="font-semibold text-blue-900 mb-2">📌 How Staff Advances Work</h3>
+        <ul className="text-sm text-blue-800 space-y-1">
+          <li>• Staff accounts are created in Chart of Accounts (Code 116x)</li>
+          <li>• Giving advance = Payment Voucher (Dr Staff, Cr Bank/Cash)</li>
+          <li>• Receiving repayment = Receipt Voucher (Dr Bank/Cash, Cr Staff)</li>
+          <li>• All transactions appear in Journal Register, Trial Balance, and Party Ledger</li>
+          <li>• Bank payments are automatically linked to Bank Reconciliation</li>
+          <li>• Uses standard accounting voucher system - no parallel tracking</li>
+        </ul>
+      </div>
+
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-900">Staff Loans & Advances</h2>
-        <button
-          onClick={() => setModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <Plus className="w-4 h-4" />
-          New Loan
-        </button>
+        <h2 className="text-xl font-semibold text-gray-900">Staff Advances & Loans</h2>
+        <div className="flex gap-2">
+          <button
+            onClick={() => window.open('#/finance?tab=party_ledger', '_self')}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+          >
+            <ExternalLink className="w-4 h-4" />
+            Party Ledger
+          </button>
+          <button
+            onClick={navigateToBankRecon}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+          >
+            <ExternalLink className="w-4 h-4" />
+            Bank Recon
+          </button>
+          <button
+            onClick={() => setNewStaffModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <Plus className="w-4 h-4" />
+            Add Staff
+          </button>
+        </div>
       </div>
 
       {balances.length > 0 && (
         <div className="bg-white rounded-lg shadow-sm p-6">
           <h3 className="text-lg font-medium mb-4">Outstanding Balances</h3>
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {balances.map((balance) => (
               <div
                 key={balance.staff_name}
-                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer"
-                onClick={() => viewLedger(balance.staff_name)}
+                className="p-4 bg-gradient-to-br from-red-50 to-orange-50 rounded-lg border border-red-200 cursor-pointer hover:shadow-md transition-shadow"
+                onClick={() => {
+                  const staff = staffMembers.find(s => s.staff_name === balance.staff_name);
+                  if (staff) viewLedger(staff);
+                }}
               >
-                <div className="flex items-center gap-3">
-                  <UserCircle className="w-5 h-5 text-gray-400" />
-                  <span className="font-medium">{balance.staff_name}</span>
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <UserCircle className="w-5 h-5 text-gray-400" />
+                    <span className="font-semibold text-gray-900">{balance.staff_name}</span>
+                  </div>
+                  <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">
+                    {balance.account_code}
+                  </span>
                 </div>
-                <div className="text-right">
-                  <div className="text-lg font-semibold text-red-600">
-                    Rp {balance.outstanding_balance.toLocaleString('id-ID')}
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    Loans: Rp {balance.total_loans.toLocaleString('id-ID')} | Repaid: Rp{' '}
-                    {balance.total_repayments.toLocaleString('id-ID')}
-                  </div>
+                <div className="text-2xl font-bold text-red-600 mb-1">
+                  Rp {Math.abs(balance.outstanding_balance).toLocaleString('id-ID')}
+                </div>
+                <div className="text-xs text-gray-500">
+                  Last: {new Date(balance.last_transaction_date).toLocaleDateString('id-ID')}
                 </div>
               </div>
             ))}
@@ -279,7 +457,7 @@ export function StaffLoansManager() {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
               type="text"
-              placeholder="Search by staff name or loan number..."
+              placeholder="Search by staff name or employee ID..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg"
@@ -292,25 +470,16 @@ export function StaffLoansManager() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Loan No
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Staff Name
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Loan Date
+                  Employee ID
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                  Loan Amount
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  Department
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                  Repaid
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                  Balance
-                </th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
-                  Status
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  Account Code
                 </th>
                 <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
                   Actions
@@ -318,54 +487,55 @@ export function StaffLoansManager() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {filteredLoans.map((loan) => (
-                <tr key={loan.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-sm">{loan.loan_number}</td>
-                  <td className="px-4 py-3 font-medium">{loan.staff_name}</td>
-                  <td className="px-4 py-3 text-sm">
-                    {new Date(loan.loan_date).toLocaleDateString('id-ID')}
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium">
-                    Rp {loan.loan_amount.toLocaleString('id-ID')}
-                  </td>
-                  <td className="px-4 py-3 text-right text-green-600">
-                    Rp {loan.amount_repaid.toLocaleString('id-ID')}
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold text-red-600">
-                    Rp {loan.balance.toLocaleString('id-ID')}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(loan.status)}`}>
-                      {loan.status.toUpperCase()}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-center gap-2">
-                      {loan.status !== 'repaid' && (
+              {filteredStaff.map((staff) => {
+                const balance = balances.find(b => b.staff_name === staff.staff_name);
+                return (
+                  <tr key={staff.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium">{staff.staff_name}</td>
+                    <td className="px-4 py-3 text-sm">{staff.employee_id || '-'}</td>
+                    <td className="px-4 py-3 text-sm">{staff.department || '-'}</td>
+                    <td className="px-4 py-3">
+                      <span className="text-xs bg-gray-100 px-2 py-1 rounded font-mono">
+                        {balance?.account_code || '-'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-center gap-2">
                         <button
                           onClick={() => {
-                            setSelectedLoan(loan);
+                            setSelectedStaff(staff);
+                            setAdvanceModalOpen(true);
+                          }}
+                          className="flex items-center gap-1 text-red-600 hover:text-red-800 text-sm font-medium"
+                        >
+                          <TrendingUp className="w-4 h-4" />
+                          Give Advance
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelectedStaff(staff);
                             setRepaymentModalOpen(true);
                           }}
-                          className="text-green-600 hover:text-green-800 text-sm font-medium"
+                          className="flex items-center gap-1 text-green-600 hover:text-green-800 text-sm font-medium"
                         >
-                          Add Repayment
+                          <TrendingDown className="w-4 h-4" />
+                          Receive Payment
                         </button>
-                      )}
-                      <button
-                        onClick={() => viewRepayments(loan)}
-                        className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                      >
-                        View
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filteredLoans.length === 0 && (
+                        <button
+                          onClick={() => viewLedger(staff)}
+                          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                        >
+                          View Ledger
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {filteredStaff.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
-                    No loans found
+                  <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                    No staff members found
                   </td>
                 </tr>
               )}
@@ -374,8 +544,13 @@ export function StaffLoansManager() {
         </div>
       </div>
 
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="New Staff Loan">
-        <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Add New Staff Modal */}
+      <Modal
+        isOpen={newStaffModalOpen}
+        onClose={() => setNewStaffModalOpen(false)}
+        title="Add New Staff Member"
+      >
+        <form onSubmit={handleCreateStaff} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Staff Name *
@@ -383,8 +558,8 @@ export function StaffLoansManager() {
             <input
               type="text"
               required
-              value={formData.staff_name}
-              onChange={(e) => setFormData({ ...formData, staff_name: e.target.value })}
+              value={newStaffData.staff_name}
+              onChange={(e) => setNewStaffData({ ...newStaffData, staff_name: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               placeholder="e.g., Vijay Lunkad"
             />
@@ -392,92 +567,68 @@ export function StaffLoansManager() {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Loan Amount *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Employee ID</label>
               <input
-                type="number"
-                required
-                step="0.01"
-                value={formData.loan_amount}
-                onChange={(e) => setFormData({ ...formData, loan_amount: e.target.value })}
+                type="text"
+                value={newStaffData.employee_id}
+                onChange={(e) =>
+                  setNewStaffData({ ...newStaffData, employee_id: e.target.value })
+                }
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Loan Date *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
               <input
-                type="date"
-                required
-                value={formData.loan_date}
-                onChange={(e) => setFormData({ ...formData, loan_date: e.target.value })}
+                type="text"
+                value={newStaffData.department}
+                onChange={(e) => setNewStaffData({ ...newStaffData, department: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Designation</label>
             <input
-              type="date"
-              value={formData.due_date}
-              onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
+              type="text"
+              value={newStaffData.designation}
+              onChange={(e) => setNewStaffData({ ...newStaffData, designation: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg"
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Payment Method *
-            </label>
-            <select
-              value={formData.payment_method}
-              onChange={(e) => setFormData({ ...formData, payment_method: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-            >
-              <option value="cash">Cash</option>
-              <option value="bank">Bank Transfer</option>
-            </select>
-          </div>
-
-          {formData.payment_method === 'bank' && (
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Bank Account *
-              </label>
-              <select
-                required
-                value={formData.bank_account_id}
-                onChange={(e) => setFormData({ ...formData, bank_account_id: e.target.value })}
+              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+              <input
+                type="text"
+                value={newStaffData.phone}
+                onChange={(e) => setNewStaffData({ ...newStaffData, phone: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-              >
-                <option value="">Select bank account</option>
-                {bankAccounts.map((bank) => (
-                  <option key={bank.id} value={bank.id}>
-                    {bank.bank_name} - {bank.account_number}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
-          )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-            <textarea
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-              rows={3}
-            />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input
+                type="email"
+                value={newStaffData.email}
+                onChange={(e) => setNewStaffData({ ...newStaffData, email: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+          </div>
+
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
+            ℹ️ This will create a new account in Chart of Accounts (Code 116x) for this staff member
           </div>
 
           <div className="flex gap-3">
             <button
               type="button"
-              onClick={() => setModalOpen(false)}
+              onClick={() => setNewStaffModalOpen(false)}
               className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
             >
               Cancel
@@ -486,201 +637,261 @@ export function StaffLoansManager() {
               type="submit"
               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             >
-              Give Loan
+              Create Staff
             </button>
           </div>
         </form>
       </Modal>
 
+      {/* Give Advance Modal */}
       <Modal
-        isOpen={repaymentModalOpen}
-        onClose={() => setRepaymentModalOpen(false)}
-        title={`Loan Repayment - ${selectedLoan?.staff_name}`}
+        isOpen={advanceModalOpen}
+        onClose={() => setAdvanceModalOpen(false)}
+        title={`Give Advance - ${selectedStaff?.staff_name}`}
       >
-        {selectedLoan && (
-          <form onSubmit={handleRepayment} className="space-y-4">
-            <div className="bg-blue-50 p-4 rounded-lg">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="text-gray-600">Loan Number:</span>
-                  <span className="ml-2 font-medium">{selectedLoan.loan_number}</span>
-                </div>
-                <div>
-                  <span className="text-gray-600">Balance:</span>
-                  <span className="ml-2 font-semibold text-red-600">
-                    Rp {selectedLoan.balance.toLocaleString('id-ID')}
-                  </span>
-                </div>
-              </div>
-            </div>
+        <form onSubmit={handleGiveAdvance} className="space-y-4">
+          <div className="bg-blue-50 p-4 rounded-lg text-sm text-blue-800">
+            💡 This will create a Payment Voucher: Dr Staff Account, Cr Bank/Cash
+          </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Repayment Amount *
-                </label>
-                <input
-                  type="number"
-                  required
-                  step="0.01"
-                  max={selectedLoan.balance}
-                  value={repaymentData.amount}
-                  onChange={(e) => setRepaymentData({ ...repaymentData, amount: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Repayment Date *
-                </label>
-                <input
-                  type="date"
-                  required
-                  value={repaymentData.repayment_date}
-                  onChange={(e) =>
-                    setRepaymentData({ ...repaymentData, repayment_date: e.target.value })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                />
-              </div>
-            </div>
-
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Payment Method *
-              </label>
-              <select
-                value={repaymentData.payment_method}
-                onChange={(e) =>
-                  setRepaymentData({ ...repaymentData, payment_method: e.target.value })
-                }
+              <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
+              <input
+                type="number"
+                required
+                step="0.01"
+                value={transactionData.amount}
+                onChange={(e) => setTransactionData({ ...transactionData, amount: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-              >
-                <option value="cash">Cash</option>
-                <option value="bank">Bank Transfer</option>
-              </select>
-            </div>
-
-            {repaymentData.payment_method === 'bank' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Bank Account *
-                </label>
-                <select
-                  required
-                  value={repaymentData.bank_account_id}
-                  onChange={(e) =>
-                    setRepaymentData({ ...repaymentData, bank_account_id: e.target.value })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                >
-                  <option value="">Select bank account</option>
-                  {bankAccounts.map((bank) => (
-                    <option key={bank.id} value={bank.id}>
-                      {bank.bank_name} - {bank.account_number}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <textarea
-                value={repaymentData.description}
-                onChange={(e) =>
-                  setRepaymentData({ ...repaymentData, description: e.target.value })
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                rows={2}
               />
             </div>
 
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => setRepaymentModalOpen(false)}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-              >
-                Record Repayment
-              </button>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
+              <input
+                type="date"
+                required
+                value={transactionData.transaction_date}
+                onChange={(e) =>
+                  setTransactionData({ ...transactionData, transaction_date: e.target.value })
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
             </div>
-          </form>
-        )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method *</label>
+            <select
+              value={transactionData.payment_method}
+              onChange={(e) =>
+                setTransactionData({ ...transactionData, payment_method: e.target.value })
+              }
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            >
+              <option value="cash">Cash (Petty Cash)</option>
+              <option value="bank">Bank Transfer</option>
+            </select>
+          </div>
+
+          {transactionData.payment_method === 'bank' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Bank Account *</label>
+              <select
+                required
+                value={transactionData.bank_account_id}
+                onChange={(e) =>
+                  setTransactionData({ ...transactionData, bank_account_id: e.target.value })
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              >
+                <option value="">Select bank account</option>
+                {bankAccounts.map((bank) => (
+                  <option key={bank.id} value={bank.id}>
+                    {bank.bank_name} - {bank.account_number} ({bank.currency})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
+            <textarea
+              required
+              value={transactionData.description}
+              onChange={(e) =>
+                setTransactionData({ ...transactionData, description: e.target.value })
+              }
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              rows={2}
+              placeholder="e.g., Salary advance for January"
+            />
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => setAdvanceModalOpen(false)}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+            >
+              Give Advance
+            </button>
+          </div>
+        </form>
       </Modal>
 
+      {/* Receive Repayment Modal */}
       <Modal
-        isOpen={selectedLoan !== null && repayments.length > 0 && !repaymentModalOpen}
-        onClose={() => {
-          setSelectedLoan(null);
-          setRepayments([]);
-        }}
-        title={`Repayment History - ${selectedLoan?.staff_name}`}
+        isOpen={repaymentModalOpen}
+        onClose={() => setRepaymentModalOpen(false)}
+        title={`Receive Payment - ${selectedStaff?.staff_name}`}
+      >
+        <form onSubmit={handleRecordRepayment} className="space-y-4">
+          <div className="bg-green-50 p-4 rounded-lg text-sm text-green-800">
+            💡 This will create a Receipt Voucher: Dr Bank/Cash, Cr Staff Account
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
+              <input
+                type="number"
+                required
+                step="0.01"
+                value={transactionData.amount}
+                onChange={(e) => setTransactionData({ ...transactionData, amount: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
+              <input
+                type="date"
+                required
+                value={transactionData.transaction_date}
+                onChange={(e) =>
+                  setTransactionData({ ...transactionData, transaction_date: e.target.value })
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method *</label>
+            <select
+              value={transactionData.payment_method}
+              onChange={(e) =>
+                setTransactionData({ ...transactionData, payment_method: e.target.value })
+              }
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            >
+              <option value="cash">Cash (Petty Cash)</option>
+              <option value="bank">Bank Deposit</option>
+            </select>
+          </div>
+
+          {transactionData.payment_method === 'bank' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Bank Account *</label>
+              <select
+                required
+                value={transactionData.bank_account_id}
+                onChange={(e) =>
+                  setTransactionData({ ...transactionData, bank_account_id: e.target.value })
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              >
+                <option value="">Select bank account</option>
+                {bankAccounts.map((bank) => (
+                  <option key={bank.id} value={bank.id}>
+                    {bank.bank_name} - {bank.account_number} ({bank.currency})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
+            <textarea
+              required
+              value={transactionData.description}
+              onChange={(e) =>
+                setTransactionData({ ...transactionData, description: e.target.value })
+              }
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              rows={2}
+              placeholder="e.g., Cash repayment"
+            />
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => setRepaymentModalOpen(false)}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+            >
+              Receive Payment
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Ledger Modal */}
+      <Modal
+        isOpen={ledgerModalOpen}
+        onClose={() => setLedgerModalOpen(false)}
+        title={`Staff Ledger - ${selectedStaff?.staff_name}`}
       >
         <div className="space-y-4">
           <div className="bg-gray-50 p-4 rounded-lg">
             <div className="grid grid-cols-3 gap-4 text-sm">
               <div>
-                <span className="text-gray-600">Loan Amount:</span>
-                <div className="font-semibold">
-                  Rp {selectedLoan?.loan_amount.toLocaleString('id-ID')}
+                <span className="text-gray-600">Total Debits:</span>
+                <div className="font-semibold text-red-600">
+                  Rp{' '}
+                  {ledgerEntries
+                    .reduce((sum, e) => sum + e.debit, 0)
+                    .toLocaleString('id-ID')}
                 </div>
               </div>
               <div>
-                <span className="text-gray-600">Total Repaid:</span>
+                <span className="text-gray-600">Total Credits:</span>
                 <div className="font-semibold text-green-600">
-                  Rp {selectedLoan?.amount_repaid.toLocaleString('id-ID')}
+                  Rp{' '}
+                  {ledgerEntries
+                    .reduce((sum, e) => sum + e.credit, 0)
+                    .toLocaleString('id-ID')}
                 </div>
               </div>
               <div>
                 <span className="text-gray-600">Balance:</span>
-                <div className="font-semibold text-red-600">
-                  Rp {selectedLoan?.balance.toLocaleString('id-ID')}
+                <div className="font-semibold text-blue-600">
+                  Rp{' '}
+                  {ledgerEntries.length > 0
+                    ? ledgerEntries[ledgerEntries.length - 1].balance.toLocaleString('id-ID')
+                    : '0'}
                 </div>
               </div>
             </div>
           </div>
 
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-3 py-2 text-left">Date</th>
-                <th className="px-3 py-2 text-left">Ref No</th>
-                <th className="px-3 py-2 text-right">Amount</th>
-                <th className="px-3 py-2 text-left">Method</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {repayments.map((rep) => (
-                <tr key={rep.id}>
-                  <td className="px-3 py-2">
-                    {new Date(rep.repayment_date).toLocaleDateString('id-ID')}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">{rep.repayment_number}</td>
-                  <td className="px-3 py-2 text-right font-medium text-green-600">
-                    Rp {rep.amount.toLocaleString('id-ID')}
-                  </td>
-                  <td className="px-3 py-2 capitalize">{rep.payment_method}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Modal>
-
-      <Modal
-        isOpen={ledgerModalOpen}
-        onClose={() => setLedgerModalOpen(false)}
-        title={`Staff Ledger - ${selectedStaffName}`}
-      >
-        <div className="space-y-4">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
@@ -697,11 +908,11 @@ export function StaffLoansManager() {
                 {ledgerEntries.map((entry, idx) => (
                   <tr key={idx} className="hover:bg-gray-50">
                     <td className="px-3 py-2">
-                      {new Date(entry.transaction_date).toLocaleDateString('id-ID')}
+                      {new Date(entry.entry_date).toLocaleDateString('id-ID')}
                     </td>
                     <td className="px-3 py-2">
                       <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded">
-                        {entry.transaction_type}
+                        {entry.voucher_type}
                       </span>
                     </td>
                     <td className="px-3 py-2 font-mono text-xs">{entry.reference_number}</td>
@@ -725,6 +936,11 @@ export function StaffLoansManager() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+            💡 All transactions are also visible in Party Ledger, Journal Register, and Bank
+            Reconciliation
           </div>
         </div>
       </Modal>
