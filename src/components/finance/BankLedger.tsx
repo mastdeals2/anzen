@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { BookOpen, Download, RefreshCw } from 'lucide-react';
-import { Modal } from '../Modal';
-import { useFinance } from '../../contexts/FinanceContext';
 
 interface BankAccount {
   id: string;
@@ -10,7 +8,6 @@ interface BankAccount {
   account_number: string;
   currency: string;
   opening_balance: number;
-  opening_balance_date: string;
 }
 
 interface LedgerEntry {
@@ -28,8 +25,6 @@ interface BankLedgerProps {
 }
 
 export default function BankLedger({ selectedBank: propSelectedBank }: BankLedgerProps) {
-  const { dateRange: globalDateRange } = useFinance();
-
   const [banks, setBanks] = useState<BankAccount[]>([]);
   const [selectedBank, setSelectedBank] = useState<string>('');
   const [ledgerEntries, setLedgerEntries] = useState<any[]>([]);
@@ -38,12 +33,11 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [expenseDocuments, setExpenseDocuments] = useState<string[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
-  const [openingBalance, setOpeningBalance] = useState(0);
-  const [showOpeningBalanceModal, setShowOpeningBalanceModal] = useState(false);
-  const [openingBalanceForm, setOpeningBalanceForm] = useState({
-    balance: 0,
-    date: '2025-01-01'
+  const [dateRange, setDateRange] = useState({
+    start: new Date(new Date().getFullYear(), 3, 1).toISOString().split('T')[0],
+    end: new Date().toISOString().split('T')[0],
   });
+  const [openingBalance, setOpeningBalance] = useState(0);
 
   useEffect(() => {
     loadBanks();
@@ -59,7 +53,7 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
     if (selectedBank) {
       loadLedgerEntries();
     }
-  }, [selectedBank, globalDateRange.startDate, globalDateRange.endDate]);
+  }, [selectedBank, dateRange]);
 
   useEffect(() => {
     if (showDetailModal && selectedEntry && selectedEntry.type === 'expense') {
@@ -109,54 +103,19 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
     setLoading(true);
     try {
       const selectedBankData = banks.find(b => b.id === selectedBank);
-      const storedOpeningBalance = selectedBankData?.opening_balance || 0;
-      const openingBalanceDate = selectedBankData?.opening_balance_date || '2025-01-01';
-
-      console.log('📊 Loading ledger for bank:', selectedBankData?.bank_name, selectedBankData?.account_number, 'ID:', selectedBank);
-      console.log('💰 Opening Balance:', storedOpeningBalance, 'as of', openingBalanceDate);
-      console.log('📅 Date Range:', globalDateRange.startDate, 'to', globalDateRange.endDate);
-
-      // Calculate the effective opening balance for the filtered period
-      let effectiveOpeningBalance = storedOpeningBalance;
-
-      // If filter starts after the opening balance date, calculate balance up to filter start
-      if (globalDateRange.startDate > openingBalanceDate) {
-        console.log('🔄 Calculating opening balance from', openingBalanceDate, 'to', globalDateRange.startDate);
-
-        // Get all transactions between opening_balance_date and filter start date (exclusive)
-        const { data: priorTransactions } = await supabase.rpc('calculate_balance_between_dates', {
-          p_bank_account_id: selectedBank,
-          p_start_date: openingBalanceDate,
-          p_end_date: globalDateRange.startDate
-        });
-
-        if (priorTransactions && priorTransactions.length > 0) {
-          const netChange = priorTransactions[0].net_change || 0;
-          effectiveOpeningBalance = storedOpeningBalance + netChange;
-          console.log('✅ Net change:', netChange, '→ Effective opening balance:', effectiveOpeningBalance);
-        }
-      }
-
-      setOpeningBalance(effectiveOpeningBalance);
+      const opening = selectedBankData?.opening_balance || 0;
+      setOpeningBalance(opening);
 
       const entries: any[] = [];
 
-      // Calculate next day for inclusive end date filtering
-      const endDatePlusOne = new Date(globalDateRange.endDate);
-      endDatePlusOne.setDate(endDatePlusOne.getDate() + 1);
-      const endDateStr = endDatePlusOne.toISOString().split('T')[0];
-
-      // Get bank statement lines ONLY (actual bank transactions)
-      // Bank statements are the source of truth - they already include all cleared transactions
+      // Get bank statement lines FIRST (actual bank transactions)
       const { data: bankLines } = await supabase
         .from('bank_statement_lines')
         .select('id, transaction_date, description, reference, debit_amount, credit_amount, matched_expense_id, matched_receipt_id, matched_entry_id, notes')
         .eq('bank_account_id', selectedBank)
-        .gte('transaction_date', globalDateRange.startDate)
-        .lt('transaction_date', endDateStr)
+        .gte('transaction_date', dateRange.start)
+        .lte('transaction_date', dateRange.end)
         .order('transaction_date');
-
-      console.log('✅ Bank statement lines found:', bankLines?.length || 0);
 
       if (bankLines) {
         bankLines.forEach(line => {
@@ -174,20 +133,84 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
         });
       }
 
-      // Sort by date, then by type (credits before debits on same date)
-      entries.sort((a, b) => {
-        const dateCompare = new Date(a.entry_date).getTime() - new Date(b.entry_date).getTime();
-        if (dateCompare !== 0) return dateCompare;
+      // Get receipt vouchers (customer payments - increases bank balance)
+      const { data: receipts } = await supabase
+        .from('receipt_vouchers')
+        .select('id, voucher_date, voucher_number, amount, description, customers(company_name)')
+        .gte('voucher_date', dateRange.start)
+        .lte('voucher_date', dateRange.end)
+        .order('voucher_date');
 
-        // On same date, show credits (money in) before debits (money out)
-        const aIsCredit = a.credit > 0;
-        const bIsCredit = b.credit > 0;
-        if (aIsCredit && !bIsCredit) return -1;
-        if (!aIsCredit && bIsCredit) return 1;
-        return 0;
-      });
+      if (receipts) {
+        receipts.forEach(r => {
+          entries.push({
+            id: r.id,
+            entry_date: r.voucher_date,
+            particulars: `Receipt from ${(r.customers as any)?.company_name || 'Customer'}`,
+            reference: r.voucher_number,
+            debit: 0,
+            credit: r.amount,
+            type: 'receipt',
+            description: r.description,
+            customerName: (r.customers as any)?.company_name
+          });
+        });
+      }
 
-      let runningBalance = effectiveOpeningBalance;
+      // Get payment vouchers (supplier payments - decreases bank balance)
+      const { data: payments } = await supabase
+        .from('payment_vouchers')
+        .select('id, voucher_date, voucher_number, amount, description, suppliers(company_name)')
+        .gte('voucher_date', dateRange.start)
+        .lte('voucher_date', dateRange.end)
+        .order('voucher_date');
+
+      if (payments) {
+        payments.forEach(p => {
+          entries.push({
+            id: p.id,
+            entry_date: p.voucher_date,
+            particulars: `Payment to ${(p.suppliers as any)?.company_name || 'Supplier'}`,
+            reference: p.voucher_number,
+            debit: p.amount,
+            credit: 0,
+            type: 'payment',
+            description: p.description,
+            supplierName: (p.suppliers as any)?.company_name
+          });
+        });
+      }
+
+      // Get expenses paid via bank
+      const { data: expenses } = await supabase
+        .from('finance_expenses')
+        .select('id, expense_date, voucher_number, amount, description, expense_category, context_type, context_id')
+        .gte('expense_date', dateRange.start)
+        .lte('expense_date', dateRange.end)
+        .order('expense_date');
+
+      if (expenses) {
+        expenses.forEach(e => {
+          entries.push({
+            id: e.id,
+            entry_date: e.expense_date,
+            particulars: `Expense - ${e.expense_category || e.description || 'General'}`,
+            reference: e.voucher_number || '-',
+            debit: e.amount,
+            credit: 0,
+            type: 'expense',
+            description: e.description,
+            expenseCategory: e.expense_category,
+            contextType: e.context_type,
+            contextId: e.context_id
+          });
+        });
+      }
+
+      // Sort by date
+      entries.sort((a, b) => new Date(a.entry_date).getTime() - new Date(b.entry_date).getTime());
+
+      let runningBalance = opening;
       const ledger: LedgerEntry[] = entries.map((entry: any) => {
         const debit = entry.debit || 0;
         const credit = entry.credit || 0;
@@ -213,36 +236,21 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
     }
   };
 
-  const updateOpeningBalance = async () => {
+  const updateOpeningBalance = async (newBalance: number) => {
     if (!selectedBank) return;
 
     try {
       const { error } = await supabase
         .from('bank_accounts')
-        .update({
-          opening_balance: openingBalanceForm.balance,
-          opening_balance_date: openingBalanceForm.date
-        })
+        .update({ opening_balance: newBalance })
         .eq('id', selectedBank);
 
       if (error) throw error;
 
-      setShowOpeningBalanceModal(false);
       await loadBanks();
       await loadLedgerEntries();
     } catch (err: any) {
       alert('Failed to update opening balance: ' + err.message);
-    }
-  };
-
-  const openEditOpeningBalance = () => {
-    const selectedBankData = banks.find(b => b.id === selectedBank);
-    if (selectedBankData) {
-      setOpeningBalanceForm({
-        balance: selectedBankData.opening_balance,
-        date: selectedBankData.opening_balance_date || '2025-01-01'
-      });
-      setShowOpeningBalanceModal(true);
     }
   };
 
@@ -279,7 +287,7 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
 
     const csv = [
       `Bank Ledger - ${selectedBankData.bank_name} (${selectedBankData.account_number})`,
-      `Period: ${new Date(globalDateRange.startDate).toLocaleDateString('id-ID')} to ${new Date(globalDateRange.endDate).toLocaleDateString('id-ID')}`,
+      `Period: ${new Date(dateRange.start).toLocaleDateString('id-ID')} to ${new Date(dateRange.end).toLocaleDateString('id-ID')}`,
       `Opening Balance: ${formatAmount(openingBalance, selectedBankData.currency)}`,
       '',
       headers.join(','),
@@ -327,39 +335,61 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
       </div>
 
       <div className="bg-white rounded-lg shadow-sm p-4">
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Bank Account</label>
-          <select
-            value={selectedBank}
-            onChange={(e) => setSelectedBank(e.target.value)}
-            className="w-full px-3 py-2 border rounded-lg max-w-md"
-          >
-            <option value="">Select Bank Account</option>
-            {banks.map(bank => (
-              <option key={bank.id} value={bank.id}>
-                {bank.bank_name} - {bank.account_number} ({bank.currency})
-              </option>
-            ))}
-          </select>
-          <p className="text-xs text-gray-500 mt-1">Period is controlled by global date range at top</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Bank Account</label>
+            <select
+              value={selectedBank}
+              onChange={(e) => setSelectedBank(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg"
+            >
+              <option value="">Select Bank Account</option>
+              {banks.map(bank => (
+                <option key={bank.id} value={bank.id}>
+                  {bank.bank_name} - {bank.account_number}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">From Date</label>
+            <input
+              type="date"
+              value={dateRange.start}
+              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">To Date</label>
+            <input
+              type="date"
+              value={dateRange.end}
+              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg"
+            />
+          </div>
         </div>
 
         {selectedBankData && (
           <div className="mb-4 p-3 bg-blue-50 rounded-lg">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-700">Opening Balance (as of {new Date(globalDateRange.startDate).toLocaleDateString('id-ID')})</p>
+                <p className="text-sm font-medium text-gray-700">Opening Balance</p>
                 <p className="text-lg font-bold text-blue-600">
                   {formatAmount(openingBalance, selectedBankData.currency)}
                 </p>
-                {globalDateRange.startDate > selectedBankData.opening_balance_date && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    Adjusted for filtered date range
-                  </p>
-                )}
               </div>
               <button
-                onClick={openEditOpeningBalance}
+                onClick={() => {
+                  const newBalance = prompt('Enter new opening balance:', openingBalance.toString());
+                  if (newBalance !== null) {
+                    const parsed = parseFloat(newBalance);
+                    if (!isNaN(parsed)) {
+                      updateOpeningBalance(parsed);
+                    }
+                  }
+                }}
                 className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
               >
                 Update
@@ -397,14 +427,8 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 <tr className="bg-blue-50 font-semibold">
-                  <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
-                    {new Date(globalDateRange.startDate).toLocaleDateString('id-ID')}
-                  </td>
-                  <td className="px-3 py-2 text-sm text-gray-900" colSpan={2}>
+                  <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900" colSpan={3}>
                     Opening Balance
-                    {globalDateRange.startDate > (selectedBankData?.opening_balance_date || '') && (
-                      <span className="ml-2 text-xs font-normal text-gray-600">(adjusted for date filter)</span>
-                    )}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right">-</td>
                   <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right">-</td>
@@ -608,60 +632,6 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
           </div>
         </div>
       )}
-
-      <Modal
-        isOpen={showOpeningBalanceModal}
-        onClose={() => setShowOpeningBalanceModal(false)}
-        title="Update Opening Balance"
-      >
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Opening Balance Amount *
-            </label>
-            <input
-              type="number"
-              value={openingBalanceForm.balance}
-              onChange={(e) => setOpeningBalanceForm({ ...openingBalanceForm, balance: parseFloat(e.target.value) || 0 })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              required
-              step="0.01"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Opening Balance Date *
-            </label>
-            <input
-              type="date"
-              value={openingBalanceForm.date}
-              onChange={(e) => setOpeningBalanceForm({ ...openingBalanceForm, date: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              required
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Set the date when this opening balance is effective. All transactions from this date onwards will be included in the ledger.
-            </p>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t">
-            <button
-              type="button"
-              onClick={() => setShowOpeningBalanceModal(false)}
-              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={updateOpeningBalance}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              Update
-            </button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }

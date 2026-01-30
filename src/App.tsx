@@ -3,7 +3,6 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { NavigationProvider, useNavigation } from './contexts/NavigationContext';
 import { Login } from './components/Login';
-import { ToastContainer } from './components/ToastNotification';
 import { Dashboard } from './pages/Dashboard';
 import { Products } from './pages/Products';
 import { Customers } from './pages/Customers';
@@ -33,17 +32,9 @@ function AppContent() {
   const { currentPage } = useNavigation();
 
   useEffect(() => {
-    let cleanup: (() => void) | undefined;
-
     if (user && profile) {
-      const intervalId = setTimeout(() => {
-        initializeNotificationChecks();
-      }, 2000);
-
-      cleanup = () => clearTimeout(intervalId);
+      initializeNotificationChecks();
     }
-
-    return cleanup;
   }, [user, profile]);
 
   if (window.location.pathname === '/setup') {
@@ -118,7 +109,6 @@ function AppContent() {
     <>
       {renderPage()}
       <ApprovalNotifications />
-      <ToastContainer />
     </>
   );
 }

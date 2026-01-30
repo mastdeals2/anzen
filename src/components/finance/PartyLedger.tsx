@@ -3,7 +3,6 @@ import { supabase } from '../../lib/supabase';
 import { Users, Building2, Download, Mail, RefreshCw } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
-import { useFinance } from '../../contexts/FinanceContext';
 
 interface Party {
   id: string;
@@ -28,13 +27,16 @@ interface LedgerEntry {
 }
 
 export default function PartyLedger() {
-  const { dateRange: globalDateRange } = useFinance();
   const printRef = useRef<HTMLDivElement>(null);
   const [partyType, setPartyType] = useState<'customer' | 'supplier'>('customer');
   const [parties, setParties] = useState<Party[]>([]);
   const [selectedParty, setSelectedParty] = useState<string>('');
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [dateRange, setDateRange] = useState({
+    start: new Date(new Date().getFullYear(), 3, 1).toISOString().split('T')[0],
+    end: new Date().toISOString().split('T')[0],
+  });
   const [openingBalance, setOpeningBalance] = useState(0);
   const [sendingEmail, setSendingEmail] = useState(false);
 
@@ -49,7 +51,7 @@ export default function PartyLedger() {
       setLedgerEntries([]);
       setOpeningBalance(0);
     }
-  }, [selectedParty, globalDateRange.startDate, globalDateRange.endDate]);
+  }, [selectedParty, dateRange]);
 
   const loadParties = async () => {
     const tableName = partyType === 'customer' ? 'customers' : 'suppliers';
@@ -82,8 +84,8 @@ export default function PartyLedger() {
           .from('sales_invoices')
           .select('id, invoice_date, invoice_number, total_amount, payment_status')
           .eq('customer_id', selectedParty)
-          .gte('invoice_date', globalDateRange.startDate)
-          .lte('invoice_date', globalDateRange.endDate)
+          .gte('invoice_date', dateRange.start)
+          .lte('invoice_date', dateRange.end)
           .order('invoice_date');
 
         if (invoices) {
@@ -105,8 +107,8 @@ export default function PartyLedger() {
           .from('receipt_vouchers')
           .select('id, voucher_date, voucher_number, amount, description')
           .eq('customer_id', selectedParty)
-          .gte('voucher_date', globalDateRange.startDate)
-          .lte('voucher_date', globalDateRange.endDate)
+          .gte('voucher_date', dateRange.start)
+          .lte('voucher_date', dateRange.end)
           .order('voucher_date');
 
         if (receipts) {
@@ -128,8 +130,8 @@ export default function PartyLedger() {
           .from('credit_notes')
           .select('id, credit_note_date, credit_note_number, total_amount')
           .eq('customer_id', selectedParty)
-          .gte('credit_note_date', globalDateRange.startDate)
-          .lte('credit_note_date', globalDateRange.endDate)
+          .gte('credit_note_date', dateRange.start)
+          .lte('credit_note_date', dateRange.end)
           .eq('status', 'approved')
           .order('credit_note_date');
 
@@ -152,8 +154,8 @@ export default function PartyLedger() {
           .from('purchase_invoices')
           .select('id, invoice_date, invoice_number, total_amount, payment_status')
           .eq('supplier_id', selectedParty)
-          .gte('invoice_date', globalDateRange.startDate)
-          .lte('invoice_date', globalDateRange.endDate)
+          .gte('invoice_date', dateRange.start)
+          .lte('invoice_date', dateRange.end)
           .order('invoice_date');
 
         if (invoices) {
@@ -175,8 +177,8 @@ export default function PartyLedger() {
           .from('payment_vouchers')
           .select('id, voucher_date, voucher_number, amount, description')
           .eq('supplier_id', selectedParty)
-          .gte('voucher_date', globalDateRange.startDate)
-          .lte('voucher_date', globalDateRange.endDate)
+          .gte('voucher_date', dateRange.start)
+          .lte('voucher_date', dateRange.end)
           .order('voucher_date');
 
         if (payments) {
@@ -371,8 +373,23 @@ export default function PartyLedger() {
               ))}
             </select>
           </div>
-          <div className="col-span-2">
-            <p className="text-xs text-gray-500 mt-6">Period is controlled by global date range at top</p>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">From Date</label>
+            <input
+              type="date"
+              value={dateRange.start}
+              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">To Date</label>
+            <input
+              type="date"
+              value={dateRange.end}
+              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg"
+            />
           </div>
         </div>
 
@@ -530,7 +547,7 @@ export default function PartyLedger() {
                     STATEMENT OF ACCOUNT
                   </h2>
                   <p style={{ fontSize: '12px', color: '#666' }}>
-                    Period: {new Date(globalDateRange.startDate).toLocaleDateString('id-ID')} to {new Date(globalDateRange.endDate).toLocaleDateString('id-ID')}
+                    Period: {new Date(dateRange.start).toLocaleDateString('id-ID')} to {new Date(dateRange.end).toLocaleDateString('id-ID')}
                   </p>
                 </div>
 

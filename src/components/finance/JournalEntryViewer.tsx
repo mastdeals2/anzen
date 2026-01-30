@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Search, FileText, Filter } from 'lucide-react';
 import { Modal } from '../Modal';
-import { useFinance } from '../../contexts/FinanceContext';
 
 interface JournalEntry {
   id: string;
@@ -46,26 +45,29 @@ const sourceModuleLabels: Record<string, string> = {
 };
 
 export function JournalEntryViewer({ canManage }: JournalEntryViewerProps) {
-  const { dateRange: globalDateRange } = useFinance();
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEntry, setSelectedEntry] = useState<JournalEntry | null>(null);
   const [entryLines, setEntryLines] = useState<JournalEntryLine[]>([]);
   const [viewModalOpen, setViewModalOpen] = useState(false);
+  const [dateRange, setDateRange] = useState({
+    start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
+    end: new Date().toISOString().split('T')[0],
+  });
   const [filterModule, setFilterModule] = useState('all');
 
   useEffect(() => {
     loadEntries();
-  }, [globalDateRange.startDate, globalDateRange.endDate, filterModule]);
+  }, [dateRange, filterModule]);
 
   const loadEntries = async () => {
     try {
       let query = supabase
         .from('journal_entries')
         .select('*')
-        .gte('entry_date', globalDateRange.startDate)
-        .lte('entry_date', globalDateRange.endDate)
+        .gte('entry_date', dateRange.start)
+        .lte('entry_date', dateRange.end)
         .order('entry_date', { ascending: false })
         .order('entry_number', { ascending: false });
 
@@ -133,9 +135,21 @@ export function JournalEntryViewer({ canManage }: JournalEntryViewerProps) {
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg"
           />
         </div>
-
+        
         <div className="flex items-center gap-2">
-          <p className="text-xs text-gray-500">Period is controlled by global date range at top</p>
+          <input
+            type="date"
+            value={dateRange.start}
+            onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+            className="px-3 py-2 border border-gray-300 rounded-lg"
+          />
+          <span className="text-gray-500">to</span>
+          <input
+            type="date"
+            value={dateRange.end}
+            onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+            className="px-3 py-2 border border-gray-300 rounded-lg"
+          />
         </div>
 
         <select
@@ -156,11 +170,11 @@ export function JournalEntryViewer({ canManage }: JournalEntryViewerProps) {
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-blue-50 rounded-lg p-4">
           <p className="text-sm text-blue-600">Total Debit</p>
-          <p className="text-2xl font-bold text-blue-700">Rp {totals.debit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          <p className="text-2xl font-bold text-blue-700">Rp {totals.debit.toLocaleString('id-ID')}</p>
         </div>
         <div className="bg-green-50 rounded-lg p-4">
           <p className="text-sm text-green-600">Total Credit</p>
-          <p className="text-2xl font-bold text-green-700">Rp {totals.credit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          <p className="text-2xl font-bold text-green-700">Rp {totals.credit.toLocaleString('id-ID')}</p>
         </div>
       </div>
 
@@ -190,8 +204,8 @@ export function JournalEntryViewer({ canManage }: JournalEntryViewerProps) {
                 </td>
                 <td className="px-4 py-3 font-mono text-sm">{entry.reference_number || '-'}</td>
                 <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">{entry.description || '-'}</td>
-                <td className="px-4 py-3 text-right text-blue-600">Rp {entry.total_debit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                <td className="px-4 py-3 text-right text-green-600">Rp {entry.total_credit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td className="px-4 py-3 text-right text-blue-600">Rp {entry.total_debit.toLocaleString('id-ID')}</td>
+                <td className="px-4 py-3 text-right text-green-600">Rp {entry.total_credit.toLocaleString('id-ID')}</td>
                 <td className="px-4 py-3 text-center">
                   <button
                     onClick={() => handleViewEntry(entry)}
@@ -231,7 +245,7 @@ export function JournalEntryViewer({ canManage }: JournalEntryViewerProps) {
               </div>
               <div>
                 <span className="text-gray-500">Posted:</span>
-                <span className="ml-2">{new Date(selectedEntry.posted_at).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span className="ml-2">{new Date(selectedEntry.posted_at).toLocaleString('id-ID')}</span>
               </div>
             </div>
 
@@ -262,10 +276,10 @@ export function JournalEntryViewer({ canManage }: JournalEntryViewerProps) {
                       </td>
                       <td className="px-3 py-2 text-gray-600">{line.description || '-'}</td>
                       <td className="px-3 py-2 text-right text-blue-600">
-                        {line.debit > 0 ? `Rp ${line.debit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}
+                        {line.debit > 0 ? `Rp ${line.debit.toLocaleString('id-ID')}` : ''}
                       </td>
                       <td className="px-3 py-2 text-right text-green-600">
-                        {line.credit > 0 ? `Rp ${line.credit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}
+                        {line.credit > 0 ? `Rp ${line.credit.toLocaleString('id-ID')}` : ''}
                       </td>
                     </tr>
                   ))}
@@ -274,10 +288,10 @@ export function JournalEntryViewer({ canManage }: JournalEntryViewerProps) {
                   <tr>
                     <td colSpan={2} className="px-3 py-2 text-right">Total:</td>
                     <td className="px-3 py-2 text-right text-blue-700">
-                      Rp {selectedEntry.total_debit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      Rp {selectedEntry.total_debit.toLocaleString('id-ID')}
                     </td>
                     <td className="px-3 py-2 text-right text-green-700">
-                      Rp {selectedEntry.total_credit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      Rp {selectedEntry.total_credit.toLocaleString('id-ID')}
                     </td>
                   </tr>
                 </tfoot>

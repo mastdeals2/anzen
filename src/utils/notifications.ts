@@ -31,33 +31,20 @@ export async function createNotification(params: NotificationParams) {
 
 export async function checkAndCreateLowStockNotifications() {
   try {
-    const { data: products } = await supabase
-      .from('products')
-      .select('id, product_name, min_stock_level')
-      .gt('min_stock_level', 0);
+    const { data: settings } = await supabase
+      .from('app_settings')
+      .select('low_stock_threshold')
+      .maybeSingle();
 
-    if (!products || products.length === 0) return;
+    const lowStockThreshold = settings?.low_stock_threshold || 100;
 
-    const lowStockProducts = [];
-    for (const product of products) {
-      const { data: batches } = await supabase
-        .from('batches')
-        .select('current_stock')
-        .eq('product_id', product.id)
-        .eq('is_active', true);
+    const { data: lowStockBatches } = await supabase
+      .from('batches')
+      .select('id, batch_number, current_stock, products(product_name)')
+      .eq('is_active', true)
+      .lt('current_stock', lowStockThreshold);
 
-      const totalStock = batches?.reduce((sum, batch) => sum + (batch.current_stock || 0), 0) || 0;
-
-      if (totalStock < product.min_stock_level) {
-        lowStockProducts.push({
-          product_name: product.product_name,
-          current_stock: totalStock,
-          min_stock_level: product.min_stock_level
-        });
-      }
-    }
-
-    if (lowStockProducts && lowStockProducts.length > 0) {
+    if (lowStockBatches && lowStockBatches.length > 0) {
       const { data: users } = await supabase
         .from('user_profiles')
         .select('id')
@@ -79,7 +66,7 @@ export async function checkAndCreateLowStockNotifications() {
               userId: user.id,
               type: 'low_stock',
               title: 'Low Stock Alert',
-              message: `${lowStockProducts.length} batch(es) are running low on stock.`,
+              message: `${lowStockBatches.length} batch(es) are running low on stock.`,
             });
           }
         }
@@ -148,7 +135,7 @@ export async function checkAndCreateFollowUpNotifications() {
 
     const { data: dueActivities } = await supabase
       .from('crm_activities')
-      .select('id, customer_id, activity_type, crm_contacts(company_name)')
+      .select('id, customer_id, activity_type, customers(company_name)')
       .eq('is_completed', false)
       .not('follow_up_date', 'is', null)
       .lte('follow_up_date', today);
@@ -176,20 +163,14 @@ export async function checkAndCreateFollowUpNotifications() {
   }
 }
 
-let notificationInterval: NodeJS.Timeout | null = null;
-
 export async function initializeNotificationChecks() {
-  if (notificationInterval) {
-    clearInterval(notificationInterval);
-  }
-
   await checkAndCreateLowStockNotifications();
   await checkAndCreateExpiryNotifications();
   await checkAndCreateFollowUpNotifications();
 
-  notificationInterval = setInterval(async () => {
+  setInterval(async () => {
     await checkAndCreateLowStockNotifications();
     await checkAndCreateExpiryNotifications();
     await checkAndCreateFollowUpNotifications();
-  }, 600000);
+  }, 300000);
 }

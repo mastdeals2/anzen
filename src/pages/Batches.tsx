@@ -3,7 +3,6 @@ import { Layout } from '../components/Layout';
 import { DataTable } from '../components/DataTable';
 import { Modal } from '../components/Modal';
 import { FileUpload } from '../components/FileUpload';
-import { SearchableSelect } from '../components/SearchableSelect';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -20,17 +19,14 @@ interface Batch {
   packaging_details: string;
   import_price: number;
   import_price_usd: number | null;
-  import_price_per_unit: number | null;
   exchange_rate_usd_to_idr: number | null;
   duty_charges: number;
-  duty_percent: number | null;
   freight_charges: number;
   other_charges: number;
   expiry_date: string;
   is_active: boolean;
   import_cost_allocated: number | null;
   final_landed_cost: number | null;
-  landed_cost_per_unit: number | null;
   import_container_id: string | null;
   cost_locked: boolean | null;
   products?: {
@@ -49,7 +45,6 @@ interface Product {
   product_name: string;
   product_code: string;
   unit: string;
-  duty_percent: number;
 }
 
 interface ImportContainer {
@@ -76,11 +71,8 @@ export function Batches() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [documentsModalOpen, setDocumentsModalOpen] = useState(false);
-  const [transactionHistoryModal, setTransactionHistoryModal] = useState(false);
   const [selectedBatchDocs, setSelectedBatchDocs] = useState<BatchDocument[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
-  const [selectedProductForHistory, setSelectedProductForHistory] = useState<{id: string; name: string; code: string} | null>(null);
-  const [transactionHistory, setTransactionHistory] = useState<any[]>([]);
   const [editingBatch, setEditingBatch] = useState<Batch | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
   const [formData, setFormData] = useState({
@@ -93,7 +85,6 @@ export function Batches() {
     import_price_usd: 0,
     exchange_rate_usd_to_idr: 0,
     duty_charges: 0,
-    duty_percent: 0,
     duty_charge_type: 'fixed' as 'percentage' | 'fixed',
     freight_charges: 0,
     freight_charge_type: 'fixed' as 'percentage' | 'fixed',
@@ -146,7 +137,7 @@ export function Batches() {
     try {
       const { data, error } = await supabase
         .from('products')
-        .select('id, product_name, product_code, unit, duty_percent')
+        .select('id, product_name, product_code, unit')
         .eq('is_active', true)
         .order('product_name');
 
@@ -228,50 +219,47 @@ export function Batches() {
         return amount;
       };
 
-      // Calculate duty from duty_percent (Form A1)
-      const dutyAmount = (importPriceIDR * formData.duty_percent) / 100;
+      const dutyAmount = calculateCharge(formData.duty_charges, formData.duty_charge_type, importPriceIDR);
       const freightAmount = calculateCharge(formData.freight_charges, formData.freight_charge_type, importPriceIDR);
       const otherAmount = calculateCharge(formData.other_charges, formData.other_charge_type, importPriceIDR);
+
+      const batchData = {
+        batch_number: formData.batch_number,
+        product_id: formData.product_id,
+        import_container_id: formData.import_container_id || null,
+        import_date: formData.import_date,
+        import_quantity: formData.import_quantity,
+        current_stock: formData.import_quantity,
+        packaging_details: formData.packaging_details,
+        import_price: importPriceIDR,
+        import_price_usd: formData.import_price_usd || null,
+        exchange_rate_usd_to_idr: formData.exchange_rate_usd_to_idr || null,
+        duty_charges: dutyAmount,
+        duty_charge_type: formData.duty_charge_type,
+        freight_charges: freightAmount,
+        freight_charge_type: formData.freight_charge_type,
+        other_charges: otherAmount,
+        other_charge_type: formData.other_charge_type,
+        expiry_date: formData.expiry_date || null,
+      };
 
       let batchId: string;
 
       if (editingBatch) {
-        const quantityDelta = formData.import_quantity - editingBatch.import_quantity;
-
-        const batchUpdateData = {
-          batch_number: formData.batch_number,
-          product_id: formData.product_id,
-          import_container_id: formData.import_container_id && formData.import_container_id.trim() !== '' ? formData.import_container_id : null,
-          import_date: formData.import_date,
-          import_quantity: formData.import_quantity,
-          packaging_details: formData.packaging_details,
-          import_price: importPriceIDR,
-          import_price_usd: formData.import_price_usd || null,
-          exchange_rate_usd_to_idr: formData.exchange_rate_usd_to_idr || null,
-          duty_percent: formData.duty_percent || 0,
-          duty_charges: dutyAmount,
-          duty_charge_type: 'percentage',
-          freight_charges: freightAmount,
-          freight_charge_type: formData.freight_charge_type,
-          other_charges: otherAmount,
-          other_charge_type: formData.other_charge_type,
-          expiry_date: formData.expiry_date || null,
-        };
-
         const { error } = await supabase
           .from('batches')
-          .update(batchUpdateData)
+          .update(batchData)
           .eq('id', editingBatch.id);
 
         if (error) throw error;
         batchId = editingBatch.id;
 
-        if (quantityDelta !== 0) {
+        if (formData.import_quantity !== editingBatch.import_quantity) {
           const { error: transError } = await supabase
             .from('inventory_transactions')
             .update({
               quantity: formData.import_quantity,
-              notes: `Updated import quantity from ${editingBatch.import_quantity} to ${formData.import_quantity} (Delta: ${quantityDelta > 0 ? '+' : ''}${quantityDelta})`
+              notes: `Updated import quantity from ${editingBatch.import_quantity} to ${formData.import_quantity}`
             })
             .eq('batch_id', editingBatch.id)
             .eq('transaction_type', 'purchase');
@@ -279,42 +267,8 @@ export function Batches() {
           if (transError) {
             console.error('Error updating purchase transaction:', transError);
           }
-
-          const { data: allTransactions } = await supabase
-            .from('inventory_transactions')
-            .select('quantity')
-            .eq('batch_id', editingBatch.id);
-
-          const recalculatedStock = allTransactions?.reduce((sum, t) => sum + parseFloat(t.quantity || '0'), 0) || 0;
-
-          await supabase
-            .from('batches')
-            .update({ current_stock: recalculatedStock })
-            .eq('id', editingBatch.id);
         }
       } else {
-        // For new batches, current_stock = import_quantity
-        const batchData = {
-          batch_number: formData.batch_number,
-          product_id: formData.product_id,
-          import_container_id: formData.import_container_id && formData.import_container_id.trim() !== '' ? formData.import_container_id : null,
-          import_date: formData.import_date,
-          import_quantity: formData.import_quantity,
-          current_stock: formData.import_quantity,
-          packaging_details: formData.packaging_details,
-          import_price: importPriceIDR,
-          import_price_usd: formData.import_price_usd || null,
-          exchange_rate_usd_to_idr: formData.exchange_rate_usd_to_idr || null,
-          duty_percent: formData.duty_percent || 0,
-          duty_charges: dutyAmount,
-          duty_charge_type: 'percentage',
-          freight_charges: freightAmount,
-          freight_charge_type: formData.freight_charge_type,
-          other_charges: otherAmount,
-          other_charge_type: formData.other_charge_type,
-          expiry_date: formData.expiry_date || null,
-        };
-
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error('Not authenticated');
 
@@ -388,10 +342,6 @@ export function Batches() {
       }
     }
 
-    // Get duty_percent from the product (Form A1) as the default
-    const selectedProduct = products.find(p => p.id === batch.product_id);
-    const productDutyPercent = selectedProduct?.duty_percent || 0;
-
     setFormData({
       batch_number: batch.batch_number,
       product_id: batch.product_id,
@@ -401,7 +351,6 @@ export function Batches() {
       packaging_details: batch.packaging_details,
       import_price_usd: batch.import_price_usd || 0,
       exchange_rate_usd_to_idr: batch.exchange_rate_usd_to_idr || 0,
-      duty_percent: productDutyPercent,
       duty_charges: batch.duty_charges,
       duty_charge_type: 'fixed',
       freight_charges: batch.freight_charges,
@@ -497,7 +446,6 @@ export function Batches() {
       packaging_details: '',
       import_price_usd: 0,
       exchange_rate_usd_to_idr: 0,
-      duty_percent: 0,
       duty_charges: 0,
       duty_charge_type: 'fixed',
       freight_charges: 0,
@@ -508,59 +456,6 @@ export function Batches() {
       per_pack_weight: '',
       pack_type: 'bag',
     });
-  };
-
-  const showTransactionHistory = async (productId: string, productName: string, productCode: string) => {
-    setSelectedProductForHistory({ id: productId, name: productName, code: productCode });
-    setTransactionHistoryModal(true);
-
-    // Load transaction history for this product
-    const { data: txns, error } = await supabase
-      .from('inventory_transactions')
-      .select('*')
-      .eq('product_id', productId)
-      .order('transaction_date', { ascending: false })
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('Error loading transaction history:', error);
-      alert('Error loading transaction history: ' + error.message);
-      return;
-    }
-
-    // Load related data separately
-    const enrichedData = await Promise.all((txns || []).map(async (txn) => {
-      let dcData = null;
-      let soData = null;
-
-      // Get DC data if reference is a delivery challan
-      if (txn.reference_number && txn.reference_number.startsWith('DO-')) {
-        const { data: dc } = await supabase
-          .from('delivery_challans')
-          .select('challan_number, customer_id, customers(customer_name)')
-          .eq('challan_number', txn.reference_number)
-          .single();
-        dcData = dc;
-      }
-
-      // Get SO data if sales_order_id exists
-      if (txn.sales_order_id) {
-        const { data: so } = await supabase
-          .from('sales_orders')
-          .select('so_number, customer_id, customers(customer_name)')
-          .eq('id', txn.sales_order_id)
-          .single();
-        soData = so;
-      }
-
-      return {
-        ...txn,
-        delivery_challans: dcData,
-        sales_orders: soData
-      };
-    }));
-
-    setTransactionHistory(enrichedData);
   };
 
   const isLowStock = (batch: Batch) => batch.current_stock < batch.import_quantity * 0.2;
@@ -585,7 +480,7 @@ export function Batches() {
       return amount;
     };
 
-    const dutyAmount = (importPriceIDR * formData.duty_percent) / 100;
+    const dutyAmount = calculateCharge(formData.duty_charges, formData.duty_charge_type);
     const freightAmount = calculateCharge(formData.freight_charges, formData.freight_charge_type);
     const otherAmount = calculateCharge(formData.other_charges, formData.other_charge_type);
 
@@ -602,9 +497,9 @@ export function Batches() {
 
   const formatCurrency = (amount: number, currency: 'USD' | 'IDR' = 'IDR') => {
     if (currency === 'USD') {
-      return `$ ${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
-    return `Rp ${amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `Rp ${amount.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   };
 
   const columns = [
@@ -612,14 +507,9 @@ export function Batches() {
     {
       key: 'product',
       label: 'Product',
-      render: (value: any, batch: Batch) => (
+      render: (batch: Batch) => (
         <div>
-          <button
-            onClick={() => showTransactionHistory(batch.product_id, batch.products?.product_name || '', batch.products?.product_code || '')}
-            className="font-medium text-blue-600 hover:text-blue-800 hover:underline text-left"
-          >
-            {batch.products?.product_name}
-          </button>
+          <div className="font-medium">{batch.products?.product_name}</div>
           {batch.products?.product_code && (
             <div className="text-xs text-gray-500">{batch.products.product_code}</div>
           )}
@@ -629,12 +519,12 @@ export function Batches() {
     {
       key: 'import_date',
       label: 'Import Date',
-      render: (value: any, batch: Batch) => new Date(batch.import_date).toLocaleDateString()
+      render: (batch: Batch) => new Date(batch.import_date).toLocaleDateString()
     },
     {
       key: 'stock',
       label: 'Stock',
-      render: (value: any, batch: Batch) => {
+      render: (batch: Batch) => {
         const freeStock = batch.current_stock - (batch.reserved_stock || 0);
         return (
           <div className="flex flex-col gap-1">
@@ -663,7 +553,7 @@ export function Batches() {
     {
       key: 'pricing',
       label: 'Import Price',
-      render: (value: any, batch: Batch) => (
+      render: (batch: Batch) => (
         <div className="text-sm">
           {batch.import_price_usd && batch.exchange_rate_usd_to_idr ? (
             <>
@@ -686,58 +576,38 @@ export function Batches() {
     {
       key: 'landed_cost',
       label: 'Landed Cost',
-      render: (value: any, batch: Batch) => {
-        const hasContainer = batch.import_cost_allocated && batch.import_cost_allocated > 0;
-        const landedCostPerUnit = batch.landed_cost_per_unit || batch.import_price;
-        const containerPerUnit = hasContainer ? (batch.import_cost_allocated / batch.import_quantity) : 0;
-
-        return (
-          <div className="text-sm">
-            {batch.import_price_usd && batch.exchange_rate_usd_to_idr ? (
-              <>
-                <div className="font-medium text-blue-700">
-                  {formatCurrency(landedCostPerUnit / batch.exchange_rate_usd_to_idr, 'USD')}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {formatCurrency(landedCostPerUnit)}
-                </div>
-                {hasContainer && (
-                  <div className="text-xs text-green-600">
-                    +Container: {formatCurrency(containerPerUnit)}
-                  </div>
-                )}
-                <div className="text-xs text-gray-400">
-                  @ {batch.exchange_rate_usd_to_idr.toLocaleString('id-ID')}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="font-medium text-blue-700">
-                  {formatCurrency(landedCostPerUnit)}
-                </div>
-                {hasContainer && (
-                  <div className="text-xs text-green-600">
-                    +Container: {formatCurrency(containerPerUnit)}
-                  </div>
-                )}
-              </>
-            )}
-            {batch.import_containers?.container_ref && (
-              <div className="text-xs text-gray-400">
-                {batch.import_containers.container_ref}
+      render: (batch: Batch) => (
+        <div className="text-sm">
+          {batch.import_cost_allocated && batch.import_cost_allocated > 0 ? (
+            <>
+              <div className="font-medium text-blue-700">
+                {formatCurrency(batch.final_landed_cost || 0)}
               </div>
-            )}
-            {batch.cost_locked && (
-              <div className="text-xs text-amber-600 font-medium">🔒 Locked</div>
-            )}
-          </div>
-        );
-      }
+              <div className="text-xs text-gray-500">
+                Base: {formatCurrency(batch.import_price)}
+              </div>
+              <div className="text-xs text-green-600">
+                +Import: {formatCurrency(batch.import_cost_allocated)}
+              </div>
+              {batch.import_containers?.container_ref && (
+                <div className="text-xs text-gray-400">
+                  {batch.import_containers.container_ref}
+                </div>
+              )}
+              {batch.cost_locked && (
+                <div className="text-xs text-amber-600 font-medium">🔒 Locked</div>
+              )}
+            </>
+          ) : (
+            <div className="text-gray-400 text-xs">Not allocated</div>
+          )}
+        </div>
+      )
     },
     {
       key: 'expiry_date',
       label: 'Expiry Date',
-      render: (value: any, batch: Batch) => (
+      render: (batch: Batch) => (
         <span className={
           isExpired(batch) ? 'text-red-700 font-semibold' :
           isNearExpiry(batch) ? 'text-orange-600 font-semibold' : ''
@@ -749,7 +619,7 @@ export function Batches() {
     {
       key: 'documents',
       label: 'Docs',
-      render: (value: any, batch: Batch) => (
+      render: (batch: Batch) => (
         <button
           onClick={() => loadBatchDocuments(batch.id)}
           className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition"
@@ -762,26 +632,9 @@ export function Batches() {
     {
       key: 'total_cost',
       label: 'Total Cost',
-      render: (value: any, batch: Batch) => {
-        const totalCostIDR = batch.import_price * batch.import_quantity;
-        const totalCostUSD = batch.import_price_usd ? batch.import_price_usd * batch.import_quantity : null;
-
-        return (
-          <div className="text-sm">
-            {totalCostUSD && batch.exchange_rate_usd_to_idr ? (
-              <>
-                <div className="font-semibold text-green-700">
-                  {formatCurrency(totalCostUSD, 'USD')}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {formatCurrency(totalCostIDR)}
-                </div>
-              </>
-            ) : (
-              <div className="font-semibold">{formatCurrency(totalCostIDR)}</div>
-            )}
-          </div>
-        );
+      render: (batch: Batch) => {
+        const total = batch.import_price + batch.duty_charges + batch.freight_charges + batch.other_charges;
+        return <span className="font-medium">{formatCurrency(total)}</span>;
       }
     },
   ];
@@ -868,53 +721,6 @@ export function Batches() {
           ) : undefined}
         />
 
-        {/* Summary Section */}
-        {batches.length > 0 && (
-          <div className="bg-gradient-to-r from-blue-50 to-green-50 rounded-lg shadow-lg p-6 border-2 border-blue-200">
-            <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <DollarSign className="w-5 h-5 text-blue-600" />
-              Total Import Value Summary
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <p className="text-sm text-gray-600 font-medium">Total Value (USD)</p>
-                <p className="text-3xl font-bold text-green-700">
-                  {formatCurrency(
-                    batches.reduce((sum, batch) => {
-                      const totalUSD = batch.import_price_usd ? batch.import_price_usd * batch.import_quantity : 0;
-                      return sum + totalUSD;
-                    }, 0),
-                    'USD'
-                  )}
-                </p>
-              </div>
-              <div className="space-y-2">
-                <p className="text-sm text-gray-600 font-medium">Total Value (IDR)</p>
-                <p className="text-3xl font-bold text-blue-700">
-                  {formatCurrency(
-                    batches.reduce((sum, batch) => {
-                      const totalIDR = batch.import_price * batch.import_quantity;
-                      return sum + totalIDR;
-                    }, 0)
-                  )}
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 pt-4 border-t border-blue-200">
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-gray-600">Total Batches:</span>
-                <span className="font-semibold text-gray-900">{batches.length}</span>
-              </div>
-              <div className="flex justify-between items-center text-sm mt-1">
-                <span className="text-gray-600">Total Quantity:</span>
-                <span className="font-semibold text-gray-900">
-                  {batches.reduce((sum, batch) => sum + batch.import_quantity, 0).toLocaleString()} units
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-
         <Modal
           isOpen={modalOpen}
           onClose={() => {
@@ -922,110 +728,101 @@ export function Batches() {
             resetForm();
           }}
           title={editingBatch ? 'Edit Batch' : 'Add New Batch'}
-          size="xl"
         >
-          <form onSubmit={handleSubmit} className="space-y-2">
-            <div className="border-b pb-1.5">
-              <h3 className="text-xs font-semibold text-gray-900 mb-1.5">Basic Information</h3>
-              <div className="grid grid-cols-[2fr_1fr_1fr] gap-2 mb-2">
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div className="border-b pb-2">
+              <h3 className="text-sm font-semibold text-gray-900 mb-2">Basic Information</h3>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-0.5">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Batch Number *
                   </label>
                   <input
                     type="text"
                     value={formData.batch_number}
                     onChange={(e) => setFormData({ ...formData, batch_number: e.target.value })}
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-0.5">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Product *
+                  </label>
+                  <select
+                    value={formData.product_id}
+                    onChange={(e) => setFormData({ ...formData, product_id: e.target.value })}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                    required
+                  >
+                    <option value="">Select Product</option>
+                    {products.map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {product.product_name} ({product.product_code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Import Date *
                   </label>
                   <input
                     type="date"
                     value={formData.import_date}
                     onChange={(e) => setFormData({ ...formData, import_date: e.target.value })}
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-0.5">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Expiry Date
                   </label>
                   <input
                     type="date"
                     value={formData.expiry_date}
                     onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-0.5">
-                    Product *
-                  </label>
-                  <SearchableSelect
-                    value={formData.product_id}
-                    onChange={(value) => {
-                      const selectedProduct = products.find(p => p.id === value);
-                      setFormData({
-                        ...formData,
-                        product_id: value,
-                        duty_percent: selectedProduct?.duty_percent || 0
-                      });
-                    }}
-                    options={products.map(p => ({
-                      value: p.id,
-                      label: `${p.product_name}${p.product_code ? ` (${p.product_code})` : ''}`
-                    }))}
-                    placeholder="Select Product"
-                    className="text-sm"
-                    required
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-0.5">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Import Container (Optional)
                   </label>
-                  <SearchableSelect
+                  <select
                     value={formData.import_container_id}
-                    onChange={(value) => setFormData({ ...formData, import_container_id: value })}
-                    options={[
-                      { value: '', label: 'Select Container (Optional)' },
-                      ...importContainers.map(c => ({
-                        value: c.id,
-                        label: `${c.container_ref} (${c.status})`
-                      }))
-                    ]}
-                    placeholder="Select Container"
-                    className="text-sm"
-                  />
+                    onChange={(e) => setFormData({ ...formData, import_container_id: e.target.value })}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="">Select Container (Optional)</option>
+                    {importContainers.map((container) => (
+                      <option key={container.id} value={container.id}>
+                        {container.container_ref} ({container.status})
+                      </option>
+                    ))}
+                  </select>
                   <p className="text-xs text-gray-500 mt-0.5">Link batch to import container for cost allocation</p>
                 </div>
               </div>
             </div>
 
-            <div className="border-b pb-1.5">
-              <h3 className="text-xs font-semibold text-gray-900 mb-1.5">Quantity</h3>
-              <div className="grid grid-cols-2 gap-2">
+            <div className="border-b pb-2">
+              <h3 className="text-sm font-semibold text-gray-900 mb-2">Quantity</h3>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-0.5">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Import Quantity *
                   </label>
                   <input
                     type="number"
                     value={formData.import_quantity === 0 ? '' : formData.import_quantity}
                     onChange={(e) => setFormData({ ...formData, import_quantity: e.target.value === '' ? 0 : Number(e.target.value) })}
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
                     required
                     min="0"
                     step="0.001"
@@ -1036,10 +833,10 @@ export function Batches() {
 
                 {editingBatch && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-0.5">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
                       Current Stock
                     </label>
-                    <div className="w-full px-2 py-1 text-sm border border-gray-200 rounded bg-gray-50">
+                    <div className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded bg-gray-50">
                       <span className="text-gray-700 font-medium">{editingBatch.current_stock.toLocaleString()}</span>
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">
@@ -1051,14 +848,14 @@ export function Batches() {
               </div>
             </div>
 
-            <div className="border-b pb-1.5">
-              <h3 className="text-xs font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
-                <Package className="w-3.5 h-3.5" />
+            <div className="border-b pb-2">
+              <h3 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                <Package className="w-4 h-4" />
                 Packaging Details (Optional)
               </h3>
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-0.5">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Per Pack Weight
                   </label>
                   <input
@@ -1077,13 +874,13 @@ export function Batches() {
                       setFormData(newFormData);
                     }}
                     placeholder="e.g., 25"
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
                   />
                   <p className="text-xs text-gray-500 mt-0.5">kg per pack</p>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-0.5">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Pack Type
                   </label>
                   <select
@@ -1099,7 +896,7 @@ export function Batches() {
                       }
                       setFormData(newFormData);
                     }}
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
                   >
                     <option value="bag">Bag</option>
                     <option value="drum">Drum</option>
@@ -1111,10 +908,10 @@ export function Batches() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-0.5">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Calculated Packs
                   </label>
-                  <div className="px-2 py-1 text-sm bg-gray-50 border border-gray-200 rounded">
+                  <div className="px-2 py-1.5 text-sm bg-gray-50 border border-gray-200 rounded">
                     <span className="text-gray-700 font-medium">
                       {formData.import_quantity && formData.per_pack_weight
                         ? Math.ceil(formData.import_quantity / parseFloat(formData.per_pack_weight))
@@ -1126,7 +923,7 @@ export function Batches() {
               </div>
 
               {formData.packaging_details && (
-                <div className="mt-1 p-1.5 bg-blue-50 border border-blue-200 rounded">
+                <div className="mt-1.5 p-2 bg-blue-50 border border-blue-200 rounded">
                   <p className="text-xs text-blue-900">
                     <span className="font-semibold">Packaging: </span>
                     {formData.packaging_details}
@@ -1135,21 +932,21 @@ export function Batches() {
               )}
             </div>
 
-            <div className="border-b pb-1.5">
-              <h3 className="text-xs font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
-                <DollarSign className="w-3.5 h-3.5 text-green-600" />
+            <div className="border-b pb-2">
+              <h3 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                <DollarSign className="w-4 h-4 text-green-600" />
                 Import Pricing (USD)
               </h3>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-0.5">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Import Price (USD)
                   </label>
                   <input
                     type="number"
                     value={formData.import_price_usd === 0 ? '' : formData.import_price_usd}
                     onChange={(e) => setFormData({ ...formData, import_price_usd: e.target.value === '' ? 0 : Number(e.target.value) })}
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
                     min="0"
                     step="0.01"
                     placeholder="0.00"
@@ -1157,14 +954,14 @@ export function Batches() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-0.5">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Exchange Rate (USD to IDR)
                   </label>
                   <input
                     type="number"
                     value={formData.exchange_rate_usd_to_idr === 0 ? '' : formData.exchange_rate_usd_to_idr}
                     onChange={(e) => setFormData({ ...formData, exchange_rate_usd_to_idr: e.target.value === '' ? 0 : Number(e.target.value) })}
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
                     min="0"
                     step="0.0001"
                     placeholder="15000"
@@ -1176,7 +973,7 @@ export function Batches() {
               </div>
 
               {formData.import_price_usd > 0 && formData.exchange_rate_usd_to_idr > 0 && (
-                <div className="mt-1 p-1.5 bg-green-50 border border-green-200 rounded">
+                <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded">
                   <p className="text-xs text-green-800">
                     <span className="font-semibold">Calculated Import Price (IDR):</span>{' '}
                     {formatCurrency(formData.import_price_usd * formData.exchange_rate_usd_to_idr)}
@@ -1188,32 +985,36 @@ export function Batches() {
               )}
             </div>
 
-            <div className="border-b pb-1.5">
-              <h3 className="text-xs font-semibold text-gray-900 mb-1">Additional Charges</h3>
+            <div className="border-b pb-3">
+              <h3 className="text-sm font-semibold text-gray-900 mb-2">Additional Charges</h3>
               <div className="space-y-3">
                 <div className="grid grid-cols-[1fr_1fr_1fr] gap-2">
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Duty (Form A1 %)
+                      Duty
                     </label>
                     <div className="flex gap-0.5">
                       <input
                         type="number"
-                        value={formData.duty_percent === 0 ? '' : formData.duty_percent}
-                        onChange={(e) => setFormData({ ...formData, duty_percent: e.target.value === '' ? 0 : Number(e.target.value) })}
+                        value={formData.duty_charges === 0 ? '' : formData.duty_charges}
+                        onChange={(e) => setFormData({ ...formData, duty_charges: e.target.value === '' ? 0 : Number(e.target.value) })}
                         className="flex-1 px-1.5 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
                         min="0"
-                        max="100"
                         step="0.01"
-                        placeholder="Auto from product"
+                        placeholder="0"
                       />
-                      <div className="w-12 px-0.5 py-1 text-xs border border-gray-300 rounded bg-gray-50 flex items-center justify-center">
-                        %
-                      </div>
+                      <select
+                        value={formData.duty_charge_type}
+                        onChange={(e) => setFormData({ ...formData, duty_charge_type: e.target.value as 'percentage' | 'fixed' })}
+                        className="w-12 px-0.5 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                      >
+                        <option value="percentage">%</option>
+                        <option value="fixed">Rp</option>
+                      </select>
                     </div>
-                    {formData.duty_percent > 0 && formData.import_price_usd > 0 && formData.exchange_rate_usd_to_idr > 0 && (
+                    {formData.duty_charges > 0 && (
                       <p className="text-xs text-gray-600 mt-0.5">
-                        = {formatCurrency((formData.import_price_usd * formData.exchange_rate_usd_to_idr * formData.duty_percent) / 100)}
+                        = {formatCurrency(getChargeAmount(formData.duty_charges, formData.duty_charge_type))}
                       </p>
                     )}
                   </div>
@@ -1285,17 +1086,17 @@ export function Batches() {
               <h3 className="text-xs font-semibold text-blue-900 mb-1.5">Total Cost Summary</h3>
               <div className="space-y-0.5 text-xs text-blue-800">
                 <div className="flex justify-between">
-                  <span>Import Price (per unit):</span>
+                  <span>Import Price (IDR):</span>
                   <span className="font-medium">
                     {formatCurrency(formData.import_price_usd * formData.exchange_rate_usd_to_idr)}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Duty (Form A1):</span>
+                  <span>Duty Charges:</span>
                   <span className="font-medium">
-                    {formatCurrency((formData.import_price_usd * formData.exchange_rate_usd_to_idr * formData.duty_percent) / 100)}
-                    {formData.duty_percent > 0 && (
-                      <span className="text-xs ml-1">({formData.duty_percent}%)</span>
+                    {formatCurrency(getChargeAmount(formData.duty_charges, formData.duty_charge_type))}
+                    {formData.duty_charge_type === 'percentage' && formData.duty_charges > 0 && (
+                      <span className="text-xs ml-1">({formData.duty_charges}%)</span>
                     )}
                   </span>
                 </div>
@@ -1317,36 +1118,16 @@ export function Batches() {
                     )}
                   </span>
                 </div>
-                <div className="border-t border-blue-300 pt-1.5 mt-1.5 space-y-1">
-                  <div className="flex justify-between">
-                    <span className="font-bold">Total Cost (IDR):</span>
-                    <span className="font-bold text-sm">{formatCurrency(calculateTotalCostIDR())}</span>
-                  </div>
-                  {formData.import_quantity > 0 && (
-                    <div className="bg-green-50 border border-green-200 rounded px-2 py-1.5 mt-2">
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold text-green-900">Total Batch Cost:</span>
-                        <div className="text-right">
-                          <div className="font-bold text-green-700">
-                            {formatCurrency(formData.import_price_usd * formData.import_quantity, 'USD')}
-                          </div>
-                          <div className="text-xs text-green-600">
-                            {formatCurrency((formData.import_price_usd * formData.exchange_rate_usd_to_idr) * formData.import_quantity)}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-xs text-green-700 mt-0.5">
-                        {formatCurrency(formData.import_price_usd, 'USD')} × {formData.import_quantity} = {formatCurrency(formData.import_price_usd * formData.import_quantity, 'USD')}
-                      </div>
-                    </div>
-                  )}
+                <div className="border-t border-blue-300 pt-1.5 mt-1.5 flex justify-between">
+                  <span className="font-bold">Total Cost (IDR):</span>
+                  <span className="font-bold text-sm">{formatCurrency(calculateTotalCostIDR())}</span>
                 </div>
               </div>
             </div>
 
-            <div className="border-t pt-1.5">
-              <h3 className="text-xs font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
-                <FileText className="w-3.5 h-3.5" />
+            <div className="border-t pt-2">
+              <h3 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                <FileText className="w-4 h-4" />
                 Import Documents
               </h3>
               <FileUpload
@@ -1356,20 +1137,20 @@ export function Batches() {
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t">
+            <div className="flex justify-end gap-2 pt-3 border-t">
               <button
                 type="button"
                 onClick={() => {
                   setModalOpen(false);
                   resetForm();
                 }}
-                className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 transition"
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 transition"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition"
+                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition"
               >
                 {editingBatch ? 'Update Batch' : 'Add Batch'}
               </button>
@@ -1414,82 +1195,6 @@ export function Batches() {
               <div className="text-center py-8 text-gray-500">
                 <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
                 <p>No documents uploaded for this batch</p>
-              </div>
-            )}
-          </div>
-        </Modal>
-
-        {/* Transaction History Modal */}
-        <Modal
-          isOpen={transactionHistoryModal}
-          onClose={() => {
-            setTransactionHistoryModal(false);
-            setSelectedProductForHistory(null);
-            setTransactionHistory([]);
-          }}
-          title={`Transaction History - ${selectedProductForHistory?.name || ''} (${selectedProductForHistory?.code || ''})`}
-        >
-          <div className="space-y-3 max-h-[600px] overflow-y-auto">
-            {transactionHistory.length > 0 ? (
-              <div className="space-y-2">
-                {transactionHistory.map((txn, idx) => (
-                  <div
-                    key={txn.id}
-                    className={`p-3 rounded-lg border-l-4 ${
-                      parseFloat(txn.quantity) > 0
-                        ? 'bg-green-50 border-green-500'
-                        : 'bg-red-50 border-red-500'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`font-semibold ${
-                            parseFloat(txn.quantity) > 0 ? 'text-green-700' : 'text-red-700'
-                          }`}>
-                            {parseFloat(txn.quantity) > 0 ? '+' : ''}{parseFloat(txn.quantity).toFixed(3)}
-                          </span>
-                          <span className="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-700 uppercase">
-                            {txn.transaction_type.replace('_', ' ')}
-                          </span>
-                        </div>
-                        <div className="text-sm text-gray-600 space-y-0.5">
-                          <div><strong>Date:</strong> {new Date(txn.transaction_date).toLocaleDateString()}</div>
-                          {txn.reference_number && (
-                            <div><strong>Reference:</strong> {txn.reference_number}</div>
-                          )}
-                          {txn.reference_type === 'delivery_challan' && txn.delivery_challans && (
-                            <div className="text-xs text-blue-600">
-                              DC: {txn.delivery_challans.challan_number}
-                              {txn.delivery_challans.customers && (
-                                <span className="ml-1">→ {txn.delivery_challans.customers.customer_name}</span>
-                              )}
-                            </div>
-                          )}
-                          {txn.sales_order_id && txn.sales_orders && (
-                            <div className="text-xs text-blue-600">
-                              SO: {txn.sales_orders.so_number}
-                              {txn.sales_orders.customers && (
-                                <span className="ml-1">→ {txn.sales_orders.customers.customer_name}</span>
-                              )}
-                            </div>
-                          )}
-                          {txn.notes && (
-                            <div className="text-xs text-gray-500 italic">{txn.notes}</div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="text-right text-xs text-gray-400">
-                        {new Date(txn.created_at).toLocaleString()}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-8 text-gray-500">
-                <Package className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                <p>No transactions found for this product</p>
               </div>
             )}
           </div>

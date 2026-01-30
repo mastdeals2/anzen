@@ -475,7 +475,7 @@ export function PayablesManager({ canManage }: PayablesManagerProps) {
       label: 'Total Amount',
       render: (bill: VendorBill) => (
         <span className="font-semibold text-red-600">
-          Rp {bill.total_amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          Rp {bill.total_amount.toLocaleString('id-ID')}
         </span>
       )
     },
@@ -518,7 +518,7 @@ export function PayablesManager({ canManage }: PayablesManagerProps) {
       label: 'Amount',
       render: (payment: VendorPayment) => (
         <span className="font-semibold text-green-600">
-          Rp {payment.amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          Rp {payment.amount.toLocaleString('id-ID')}
         </span>
       )
     },
@@ -546,7 +546,7 @@ export function PayablesManager({ canManage }: PayablesManagerProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-red-100">Total Payable</p>
-              <p className="text-2xl font-bold mt-1">Rp {totalPayable.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-2xl font-bold mt-1">Rp {totalPayable.toLocaleString('id-ID')}</p>
             </div>
             <DollarSign className="w-8 h-8 text-red-200" />
           </div>
@@ -786,7 +786,7 @@ export function PayablesManager({ canManage }: PayablesManagerProps) {
                 Total Amount
               </label>
               <div className="text-2xl font-bold text-gray-900">
-                Rp {(billFormData.amount + billFormData.tax_amount).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                Rp {(billFormData.amount + billFormData.tax_amount).toLocaleString('id-ID')}
               </div>
             </div>
 
@@ -856,7 +856,7 @@ export function PayablesManager({ canManage }: PayablesManagerProps) {
                 <option value="">Select a bill</option>
                 {unpaidBills.map((bill) => (
                   <option key={bill.id} value={bill.id}>
-                    {bill.bill_number} - {bill.vendor_name} (Rp {bill.total_amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                    {bill.bill_number} - {bill.vendor_name} (Rp {bill.total_amount.toLocaleString('id-ID')})
                   </option>
                 ))}
               </select>

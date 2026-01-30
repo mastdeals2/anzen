@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Plus, X, Search } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
 
 interface Customer {
   id: string;
@@ -22,7 +21,6 @@ interface CompactInquiryFormProps {
 }
 
 export function CompactInquiryForm({ onSubmit, onCancel, initialData, isEditing = false }: CompactInquiryFormProps) {
-  const { profile } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
   const [customerSearch, setCustomerSearch] = useState('');
@@ -536,38 +534,34 @@ export function CompactInquiryForm({ onSubmit, onCancel, initialData, isEditing 
         <div className="border-t border-gray-200 pt-3">
           <h3 className="text-xs font-semibold text-gray-700 mb-2">Pricing</h3>
 
-          {/* Row: Purchase Price (Admin Only) | Offered Price | Currency */}
+          {/* Row: Purchase Price | Currency | Offered Price | Currency */}
           <div className="grid grid-cols-6 gap-2">
-            {profile?.role === 'admin' && (
-              <>
-                <div className="col-span-2">
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Purchase Price
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.purchase_price}
-                    onChange={(e) => setFormData({ ...formData, purchase_price: e.target.value })}
-                    className="w-full h-9 px-3 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    placeholder="100.00"
-                  />
-                </div>
-                <div className="col-span-1">
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Currency
-                  </label>
-                  <select
-                    value={formData.purchase_price_currency}
-                    onChange={(e) => setFormData({ ...formData, purchase_price_currency: e.target.value })}
-                    className="w-full h-9 px-3 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="USD">USD</option>
-                    <option value="IDR">IDR</option>
-                  </select>
-                </div>
-              </>
-            )}
-            <div className={profile?.role === 'admin' ? 'col-span-2' : 'col-span-4'}>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Purchase Price
+              </label>
+              <input
+                type="text"
+                value={formData.purchase_price}
+                onChange={(e) => setFormData({ ...formData, purchase_price: e.target.value })}
+                className="w-full h-9 px-3 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="100.00"
+              />
+            </div>
+            <div className="col-span-1">
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Currency
+              </label>
+              <select
+                value={formData.purchase_price_currency}
+                onChange={(e) => setFormData({ ...formData, purchase_price_currency: e.target.value })}
+                className="w-full h-9 px-3 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="USD">USD</option>
+                <option value="IDR">IDR</option>
+              </select>
+            </div>
+            <div className="col-span-2">
               <label className="block text-xs font-medium text-gray-700 mb-1">
                 Offered Price
               </label>
@@ -579,7 +573,7 @@ export function CompactInquiryForm({ onSubmit, onCancel, initialData, isEditing 
                 placeholder="150.00"
               />
             </div>
-            <div className={profile?.role === 'admin' ? 'col-span-1' : 'col-span-2'}>
+            <div className="col-span-1">
               <label className="block text-xs font-medium text-gray-700 mb-1">
                 Currency
               </label>

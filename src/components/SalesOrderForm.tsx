@@ -548,10 +548,8 @@ export default function SalesOrderForm({ existingOrder, onSuccess, onCancel }: S
   const grandTotal = items.reduce((sum, item) => sum + item.line_total, 0);
 
   const formatCurrency = (amount: number) => {
-    if (formData.currency === 'USD') {
-      return `$ ${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    }
-    return `Rp ${amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const formatted = amount.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    return formData.currency === 'USD' ? `$ ${formatted}` : `Rp ${formatted}`;
   };
 
   return (

@@ -3,7 +3,6 @@ import { Layout } from '../components/Layout';
 import { DataTable } from '../components/DataTable';
 import { Modal } from '../components/Modal';
 import { DeliveryChallanView } from '../components/DeliveryChallanView';
-import { SearchableSelect } from '../components/SearchableSelect';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigation } from '../contexts/NavigationContext';
@@ -223,14 +222,19 @@ export function DeliveryChallan() {
 
   const generateNextChallanNumber = async () => {
     try {
-      // Get current financial year automatically
-      const { data: yearCode, error: fyError } = await supabase
-        .rpc('get_current_financial_year');
+      // Get financial year from settings
+      const { data: settings } = await supabase
+        .from('app_settings')
+        .select('financial_year_start')
+        .limit(1)
+        .maybeSingle();
 
-      if (fyError) {
-        console.error('Error getting financial year:', fyError);
-        const fallbackYear = new Date().getFullYear().toString().slice(-2);
-        return `DO-${fallbackYear}-0001`;
+      let yearCode = new Date().getFullYear().toString().slice(-2);
+
+      // If financial year is set, use it
+      if (settings?.financial_year_start) {
+        const fyYear = new Date(settings.financial_year_start).getFullYear();
+        yearCode = fyYear.toString().slice(-2);
       }
 
       const prefix = 'DO';
@@ -262,8 +266,7 @@ export function DeliveryChallan() {
       return `${prefix}-${yearCode}-${paddedNumber}`;
     } catch (error) {
       console.error('Error generating challan number:', error);
-      const fallbackYear = new Date().getFullYear().toString().slice(-2);
-      return `DO-${fallbackYear}-0001`;
+      return 'DO-25-0001';
     }
   };
 
@@ -506,18 +509,10 @@ export function DeliveryChallan() {
   };
 
   const handleEdit = async (challan: DeliveryChallan) => {
-    // Load full challan with sales_order_id
-    const { data: fullChallan } = await supabase
-      .from('delivery_challans')
-      .select('*')
-      .eq('id', challan.id)
-      .single();
-
     setEditingChallan(challan);
     setFormData({
       challan_number: challan.challan_number,
       customer_id: challan.customer_id,
-      sales_order_id: fullChallan?.sales_order_id || '',
       challan_date: challan.challan_date,
       delivery_address: challan.delivery_address,
       vehicle_number: challan.vehicle_number || '',
@@ -594,25 +589,25 @@ export function DeliveryChallan() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
+      const challanData = {
+        challan_number: formData.challan_number,
+        customer_id: formData.customer_id,
+        sales_order_id: formData.sales_order_id || null,
+        challan_date: formData.challan_date,
+        delivery_address: formData.delivery_address,
+        vehicle_number: formData.vehicle_number || null,
+        driver_name: formData.driver_name || null,
+        notes: formData.notes || null,
+        approval_status: 'pending_approval',
+        created_by: user.id,
+      };
+
       let challanId: string;
 
       if (editingChallan) {
-        // When editing, DO NOT update challan_number (it's unique and shouldn't change)
-        const updateData = {
-          customer_id: formData.customer_id,
-          sales_order_id: formData.sales_order_id || null,
-          challan_date: formData.challan_date,
-          delivery_address: formData.delivery_address,
-          vehicle_number: formData.vehicle_number || null,
-          driver_name: formData.driver_name || null,
-          notes: formData.notes || null,
-          // Don't reset approval_status when editing
-          // Don't update created_by when editing
-        };
-
         const { data: updatedChallan, error: updateError } = await supabase
           .from('delivery_challans')
-          .update(updateData)
+          .update(challanData)
           .eq('id', editingChallan.id)
           .select()
           .single();
@@ -644,20 +639,6 @@ export function DeliveryChallan() {
 
         challanId = updatedChallan.id;
       } else {
-        // When creating new, include all fields including challan_number
-        const challanData = {
-          challan_number: formData.challan_number,
-          customer_id: formData.customer_id,
-          sales_order_id: formData.sales_order_id || null,
-          challan_date: formData.challan_date,
-          delivery_address: formData.delivery_address,
-          vehicle_number: formData.vehicle_number || null,
-          driver_name: formData.driver_name || null,
-          notes: formData.notes || null,
-          approval_status: 'pending_approval',
-          created_by: user.id,
-        };
-
         const { data: newChallan, error: challanError } = await supabase
           .from('delivery_challans')
           .insert([challanData])
@@ -689,37 +670,37 @@ export function DeliveryChallan() {
         }
       }
 
-      // HARDENING FIX #3: Atomic delivered_quantity update
-      // Prevents race conditions from concurrent DC creation
       if (!editingChallan && formData.sales_order_id) {
-        const dcItemsForRpc = items.map(item => ({
-          product_id: item.product_id,
-          quantity: item.quantity,
-        }));
+        const { data: soItems } = await supabase
+          .from('sales_order_items')
+          .select('id, product_id, quantity, delivered_quantity')
+          .eq('sales_order_id', formData.sales_order_id);
 
-        const { error: soUpdateError } = await supabase
-          .rpc('update_so_delivered_quantity_atomic', {
-            p_sales_order_id: formData.sales_order_id,
-            p_dc_items: dcItemsForRpc,
-          });
+        if (soItems) {
+          let allDelivered = true;
+          for (const soItem of soItems) {
+            const dcItem = items.find(i => i.product_id === soItem.product_id);
+            const newDeliveredQty = (soItem.delivered_quantity || 0) + (dcItem?.quantity || 0);
 
-        if (soUpdateError) throw soUpdateError;
+            await supabase
+              .from('sales_order_items')
+              .update({ delivered_quantity: newDeliveredQty })
+              .eq('id', soItem.id);
 
-        // Archive SO if fully delivered (status was updated by RPC)
-        const { data: updatedSO } = await supabase
-          .from('sales_orders')
-          .select('status')
-          .eq('id', formData.sales_order_id)
-          .single();
+            if (newDeliveredQty < soItem.quantity) {
+              allDelivered = false;
+            }
+          }
 
-        if (updatedSO?.status === 'delivered') {
+          const newStatus = allDelivered ? 'delivered' : 'partially_delivered';
           await supabase
             .from('sales_orders')
             .update({
-              is_archived: true,
-              archived_at: new Date().toISOString(),
-              archived_by: user.id,
-              archive_reason: 'Delivery Challan created and all items delivered'
+              status: newStatus,
+              is_archived: allDelivered,
+              archived_at: allDelivered ? new Date().toISOString() : null,
+              archived_by: allDelivered ? user.id : null,
+              archive_reason: allDelivered ? 'Delivery Challan created and all items delivered' : null
             })
             .eq('id', formData.sales_order_id);
         }
@@ -882,19 +863,19 @@ export function DeliveryChallan() {
     {
       key: 'customer',
       label: 'Customer',
-      render: (value: any, challan: DeliveryChallan) => (
+      render: (challan: DeliveryChallan) => (
         <div className="font-medium">{challan.customers?.company_name}</div>
       )
     },
     {
       key: 'challan_date',
       label: 'Date',
-      render: (value: any, challan: DeliveryChallan) => new Date(challan.challan_date).toLocaleDateString()
+      render: (challan: DeliveryChallan) => new Date(challan.challan_date).toLocaleDateString()
     },
     {
       key: 'approval_status',
       label: 'Status / Approval',
-      render: (value: any, challan: DeliveryChallan) => {
+      render: (challan: DeliveryChallan) => {
         const statusColors = {
           pending_approval: 'bg-yellow-100 text-yellow-800',
           approved: 'bg-green-100 text-green-800',
@@ -948,7 +929,7 @@ export function DeliveryChallan() {
     {
       key: 'invoicing_status',
       label: 'Invoicing Status',
-      render: (value: any, challan: DeliveryChallan) => {
+      render: (challan: DeliveryChallan) => {
         const statusColors = {
           not_invoiced: 'bg-gray-100 text-gray-700',
           partially_invoiced: 'bg-yellow-100 text-yellow-700',
@@ -1088,33 +1069,39 @@ export function DeliveryChallan() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Customer *
                 </label>
-                <SearchableSelect
+                <select
                   value={formData.customer_id}
-                  onChange={handleCustomerChange}
-                  options={customers.map(c => ({ value: c.id, label: c.company_name }))}
-                  placeholder="Select Customer"
+                  onChange={(e) => handleCustomerChange(e.target.value)}
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   required
                   disabled={!!formData.sales_order_id}
-                />
+                >
+                  <option value="">Select Customer</option>
+                  {customers.map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.company_name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Linked Sales Order
                 </label>
-                <SearchableSelect
+                <select
                   value={formData.sales_order_id}
-                  onChange={handleSalesOrderChange}
-                  options={[
-                    { value: '', label: 'No Sales Order / Manual Entry' },
-                    ...salesOrders.map((so: any) => ({
-                      value: so.id,
-                      label: `${so.so_number} (${so.status})`
-                    }))
-                  ]}
-                  placeholder="Select Sales Order"
+                  onChange={(e) => handleSalesOrderChange(e.target.value)}
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   disabled={!formData.customer_id}
-                />
+                >
+                  <option value="">No Sales Order / Manual Entry</option>
+                  {salesOrders.map((so: any) => (
+                    <option key={so.id} value={so.id}>
+                      {so.so_number} ({so.status})
+                    </option>
+                  ))}
+                </select>
                 {formData.customer_id && salesOrders.length === 0 && (
                   <p className="text-xs text-orange-600 mt-1">⚠ No active sales orders for this customer</p>
                 )}
@@ -1226,18 +1213,21 @@ export function DeliveryChallan() {
                       <div className="grid grid-cols-2 gap-2 mb-2">
                         <div>
                           <label className="block text-xs text-gray-600 mb-0.5">Product *</label>
-                          <SearchableSelect
+                          <select
                             value={item.product_id}
-                            onChange={(value) => {
+                            onChange={(e) => {
                               const newItems = [...items];
-                              newItems[index] = { ...newItems[index], product_id: value, batch_id: '' };
+                              newItems[index] = { ...newItems[index], product_id: e.target.value, batch_id: '' };
                               setItems(newItems);
                             }}
-                            options={products.map(p => ({ value: p.id, label: p.product_name }))}
-                            placeholder="Select Product"
-                            className="text-xs"
+                            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
                             required
-                          />
+                          >
+                            <option value="">Select Product</option>
+                            {products.map((p) => (
+                              <option key={p.id} value={p.id}>{p.product_name}</option>
+                            ))}
+                          </select>
                         </div>
 
                         <div>
@@ -1264,23 +1254,25 @@ export function DeliveryChallan() {
                               Select product first
                             </div>
                           ) : availableBatches.length > 0 ? (
-                            <SearchableSelect
+                            <select
                               value={item.batch_id}
-                              onChange={(value) => handleBatchChange(index, value)}
-                              options={availableBatches.map((b, idx) => {
+                              onChange={(e) => handleBatchChange(index, e.target.value)}
+                              className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                              required
+                            >
+                              <option value="">Select Batch</option>
+                              {availableBatches.map((b, idx) => {
                                 const fifoIndicator = idx === 0 ? ' 🔄' : '';
                                 const baseAvailable = b.current_stock - (b.reserved_stock || 0);
                                 const usedInOtherItems = batchUsageInForm.get(b.id) || 0;
                                 const actualAvailable = baseAvailable - usedInOtherItems;
-                                return {
-                                  value: b.id,
-                                  label: `${b.batch_number} (Avl: ${actualAvailable}kg)${fifoIndicator}`
-                                };
+                                return (
+                                  <option key={b.id} value={b.id}>
+                                    {b.batch_number} (Avl: {actualAvailable}kg){fifoIndicator}
+                                  </option>
+                                );
                               })}
-                              placeholder="Select Batch"
-                              className="text-xs"
-                              required
-                            />
+                            </select>
                           ) : (
                             <div className="w-full px-2 py-1 text-xs border border-red-300 rounded bg-red-50 text-red-700 flex items-center gap-1">
                               <span>⚠</span>

@@ -4,7 +4,6 @@ import { DataTable } from '../components/DataTable';
 import { Modal } from '../components/Modal';
 import { InvoiceView } from '../components/InvoiceView';
 import { DCMultiSelect } from '../components/DCMultiSelect';
-import { SearchableSelect } from '../components/SearchableSelect';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigation } from '../contexts/NavigationContext';
@@ -282,21 +281,11 @@ export function Sales() {
       const prefix = settings?.invoice_prefix || 'SAPJ';
       const startNumber = settings?.invoice_start_number || 1;
 
-      // Get current financial year automatically
-      const { data: yearCode, error: fyError } = await supabase
-        .rpc('get_current_financial_year');
-
-      if (fyError) {
-        console.error('Error getting financial year:', fyError);
-        const fallbackYear = new Date().getFullYear().toString().slice(-2);
-        return `${prefix}-${fallbackYear}-001`;
-      }
-
-      // Get all invoice numbers with this prefix and year to find the highest number
+      // Get all invoice numbers with this prefix to find the highest number
       const { data: allInvoices } = await supabase
         .from('sales_invoices')
         .select('invoice_number')
-        .like('invoice_number', `${prefix}-${yearCode}%`);
+        .like('invoice_number', `${prefix}%`);
 
       let nextNumber = startNumber;
 
@@ -317,11 +306,10 @@ export function Sales() {
 
       // Format with leading zeros (minimum 3 digits)
       const paddedNumber = String(nextNumber).padStart(3, '0');
-      return `${prefix}-${yearCode}-${paddedNumber}`;
+      return `${prefix}-${paddedNumber}`;
     } catch (error) {
       console.error('Error generating invoice number:', error);
-      const fallbackYear = new Date().getFullYear().toString().slice(-2);
-      return `SAPJ-${fallbackYear}-001`;
+      return 'SAPJ-001';
     }
   };
 
@@ -838,59 +826,36 @@ export function Sales() {
       let invoice;
 
       if (editingInvoice) {
-        // HARDENING FIX #1: Use atomic RPC to prevent race conditions
-        // All operations (delete + update + insert) happen in single transaction
+        // Delete old items - the database trigger will automatically restore stock
+        const { error: deleteItemsError } = await supabase
+          .from('sales_invoice_items')
+          .delete()
+          .eq('invoice_id', editingInvoice.id);
 
-        // Deduplicate items before sending (in case of UI state issues)
-        const itemsMap = new Map();
-        items
-          .filter(item => item.product_id && item.product_id.trim() !== '')
-          .forEach(item => {
-            const key = `${item.product_id}-${item.batch_id}-${item.delivery_challan_item_id || 'manual'}`;
-            if (!itemsMap.has(key)) {
-              itemsMap.set(key, {
-                product_id: item.product_id,
-                batch_id: item.batch_id,
-                quantity: item.quantity,
-                unit_price: item.unit_price,
-                tax_rate: item.tax_rate,
-                total_amount: item.total,
-                delivery_challan_item_id: item.delivery_challan_item_id || null,
-                max_quantity: item.max_quantity || null,
-              });
-            }
-          });
+        if (deleteItemsError) throw deleteItemsError;
 
-        const validItems = Array.from(itemsMap.values());
-
-        const { data: invoiceId, error: rpcError } = await supabase
-          .rpc('update_sales_invoice_atomic', {
-            p_invoice_id: editingInvoice.id,
-            p_invoice_updates: {
-              invoice_date: formData.invoice_date,
-              due_date: dueDate.toISOString().split('T')[0],
-              customer_id: formData.customer_id,
-              subtotal: totals.subtotal,
-              tax_amount: totals.taxAmount,
-              total_amount: totals.total,
-              discount_amount: formData.discount,
-              po_number: formData.po_number || null,
-              payment_terms_days: paymentTermsDays,
-              notes: formData.notes || null,
-            },
-            p_new_items: validItems,
-          });
-
-        if (rpcError) throw rpcError;
-
-        // Fetch updated invoice for return
-        const { data: updatedInvoice, error: fetchError } = await supabase
+        const { data: updatedInvoice, error: updateError} = await supabase
           .from('sales_invoices')
-          .select()
+          .update({
+            invoice_number: formData.invoice_number,
+            customer_id: formData.customer_id,
+            invoice_date: formData.invoice_date,
+            due_date: dueDate.toISOString().split('T')[0],
+            discount_amount: formData.discount,
+            delivery_challan_number: null,
+            po_number: formData.po_number || null,
+            payment_terms_days: paymentTermsDays,
+            notes: formData.notes || null,
+            subtotal: totals.subtotal,
+            tax_amount: totals.taxAmount,
+            total_amount: totals.total,
+            linked_challan_ids: selectedDCIds.length > 0 ? selectedDCIds : null,
+          })
           .eq('id', editingInvoice.id)
+          .select()
           .single();
 
-        if (fetchError) throw fetchError;
+        if (updateError) throw updateError;
         invoice = updatedInvoice;
       } else {
         // Check if invoice number already exists and regenerate if needed
@@ -931,41 +896,41 @@ export function Sales() {
 
         if (invoiceError) throw invoiceError;
         invoice = newInvoice;
+      }
 
-        // Filter and map only valid items (with product_id)
-        const invoiceItemsData = items
-          .filter(item => item.product_id && item.product_id.trim() !== '')
-          .map(item => ({
-            invoice_id: invoice.id,
-            product_id: item.product_id,
-            batch_id: item.batch_id,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            tax_rate: item.tax_rate,
-            delivery_challan_item_id: item.delivery_challan_item_id || null,
-          }));
+      // Filter and map only valid items (with product_id)
+      const invoiceItemsData = items
+        .filter(item => item.product_id && item.product_id.trim() !== '')
+        .map(item => ({
+          invoice_id: invoice.id,
+          product_id: item.product_id,
+          batch_id: item.batch_id,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          tax_rate: item.tax_rate,
+          delivery_challan_item_id: item.delivery_challan_item_id || null,
+        }));
 
-        const { error: itemsError } = await supabase
-          .from('sales_invoice_items')
-          .insert(invoiceItemsData);
+      const { error: itemsError } = await supabase
+        .from('sales_invoice_items')
+        .insert(invoiceItemsData);
 
-        if (itemsError) {
-          console.error('Error inserting invoice items:', itemsError);
-          console.error('Invoice items data:', invoiceItemsData);
-          throw new Error(`Failed to save invoice items: ${itemsError.message}`);
-        }
+      if (itemsError) {
+        console.error('Error inserting invoice items:', itemsError);
+        console.error('Invoice items data:', invoiceItemsData);
+        throw new Error(`Failed to save invoice items: ${itemsError.message}`);
+      }
 
-        // Verify items were actually inserted
-        const { data: insertedItems, error: verifyError } = await supabase
-          .from('sales_invoice_items')
-          .select('id')
-          .eq('invoice_id', invoice.id);
+      // Verify items were actually inserted
+      const { data: insertedItems, error: verifyError } = await supabase
+        .from('sales_invoice_items')
+        .select('id')
+        .eq('invoice_id', invoice.id);
 
-        if (verifyError) {
-          console.error('Error verifying items:', verifyError);
-        } else if (!insertedItems || insertedItems.length === 0) {
-          throw new Error('Invoice items were not saved. Please try again.');
-        }
+      if (verifyError) {
+        console.error('Error verifying items:', verifyError);
+      } else if (!insertedItems || insertedItems.length === 0) {
+        throw new Error('Invoice items were not saved. Please try again.');
       }
 
       // Stock deduction and inventory transactions are handled automatically by database trigger
@@ -1092,46 +1057,46 @@ export function Sales() {
     {
       key: 'customer',
       label: 'Customer',
-      render: (value: any, inv: SalesInvoice) => (
+      render: (inv: SalesInvoice) => (
         <div className="font-medium">{inv.customers?.company_name}</div>
       )
     },
     {
       key: 'invoice_date',
       label: 'Date',
-      render: (value: any, inv: SalesInvoice) => new Date(inv.invoice_date).toLocaleDateString()
+      render: (inv: SalesInvoice) => new Date(inv.invoice_date).toLocaleDateString()
     },
     {
       key: 'total_amount',
       label: 'Total Amount',
-      render: (value: any, inv: SalesInvoice) => (
-        <span className="font-medium">Rp {inv.total_amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+      render: (inv: SalesInvoice) => (
+        <span className="font-medium">Rp {inv.total_amount.toLocaleString('id-ID')}</span>
       )
     },
     {
       key: 'paid_amount',
       label: 'Paid Amount',
-      render: (value: any, inv: SalesInvoice) => (
+      render: (inv: SalesInvoice) => (
         <span className="text-green-600 font-medium">
-          Rp {(inv.paid_amount || 0).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          Rp {(inv.paid_amount || 0).toLocaleString('id-ID')}
         </span>
       )
     },
     {
       key: 'balance_amount',
       label: 'Balance',
-      render: (value: any, inv: SalesInvoice) => (
+      render: (inv: SalesInvoice) => (
         <span className={`font-medium ${
           (inv.balance_amount || 0) === 0 ? 'text-gray-400' : 'text-orange-600'
         }`}>
-          Rp {(inv.balance_amount || 0).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          Rp {(inv.balance_amount || 0).toLocaleString('id-ID')}
         </span>
       )
     },
     {
       key: 'payment_status',
       label: 'Payment Status',
-      render: (value: any, inv: SalesInvoice) => (
+      render: (inv: SalesInvoice) => (
         <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
           inv.payment_status === 'paid' ? 'bg-green-100 text-green-800' :
           inv.payment_status === 'partial' ? 'bg-yellow-100 text-yellow-800' :
@@ -1195,7 +1160,7 @@ export function Sales() {
           </div>
           <div className="bg-blue-50 rounded-lg shadow p-6">
             <p className="text-sm text-blue-600">Total Revenue</p>
-            <p className="text-2xl font-bold text-blue-600 mt-1">Rp {stats.totalRevenue.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p className="text-2xl font-bold text-blue-600 mt-1">Rp {stats.totalRevenue.toLocaleString('id-ID')}</p>
           </div>
           <div className="bg-red-50 rounded-lg shadow p-6">
             <p className="text-sm text-red-600">Pending Payment</p>
@@ -1293,9 +1258,10 @@ export function Sales() {
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Customer *</label>
-                  <SearchableSelect
+                  <select
                     value={formData.customer_id}
-                    onChange={(customerId) => {
+                    onChange={(e) => {
+                      const customerId = e.target.value;
                       setFormData({ ...formData, customer_id: customerId });
                       setSelectedChallanId('');
                       setPendingChallans([]);
@@ -1314,11 +1280,16 @@ export function Sales() {
                         setPendingDCOptions([]);
                       }
                     }}
-                    options={customers.map(c => ({ value: c.id, label: c.company_name }))}
-                    placeholder="Select Customer"
-                    className="text-sm"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
                     required
-                  />
+                  >
+                    <option value="">Select Customer</option>
+                    {customers.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.company_name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Delivery Challans</label>
@@ -1526,12 +1497,12 @@ export function Sales() {
                         <div className="flex items-center gap-2 text-[10px] px-2 py-1 bg-white rounded border border-gray-200">
                           <div className="flex items-center gap-1">
                             <span className="text-gray-600">Cost/Unit:</span>
-                            <span className="font-semibold text-gray-900">Rp {costPerUnit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            <span className="font-semibold text-gray-900">Rp {costPerUnit.toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span>
                           </div>
                           <div className="h-3 w-px bg-gray-300" />
                           <div className="flex items-center gap-1">
                             <span className="text-gray-600">Suggested Price (25%):</span>
-                            <span className="font-semibold text-blue-600">Rp {suggestedPrice.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            <span className="font-semibold text-blue-600">Rp {suggestedPrice.toLocaleString('id-ID')}</span>
                           </div>
                           <div className="h-3 w-px bg-gray-300" />
                           <div className="flex items-center gap-1">
@@ -1550,7 +1521,7 @@ export function Sales() {
                             <span className={`font-semibold ${
                               item.unit_price > costPerUnit ? 'text-green-600' : 'text-red-600'
                             }`}>
-                              Rp {(item.unit_price - costPerUnit).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              Rp {(item.unit_price - costPerUnit).toLocaleString('id-ID', { maximumFractionDigits: 0 })}
                             </span>
                           </div>
                         </div>
@@ -1564,19 +1535,19 @@ export function Sales() {
                 <div className="space-y-1 text-xs">
                   <div className="flex justify-between">
                     <span>Subtotal:</span>
-                    <span className="font-medium">Rp {calculateTotals().subtotal.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <span className="font-medium">Rp {calculateTotals().subtotal.toLocaleString('id-ID')}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Tax:</span>
-                    <span className="font-medium">Rp {calculateTotals().taxAmount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <span className="font-medium">Rp {calculateTotals().taxAmount.toLocaleString('id-ID')}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Discount:</span>
-                    <span className="font-medium">-Rp {formData.discount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <span className="font-medium">-Rp {formData.discount.toLocaleString('id-ID')}</span>
                   </div>
                   <div className="flex justify-between text-sm font-bold border-t pt-1">
                     <span>Total:</span>
-                    <span className="text-blue-600">Rp {calculateTotals().total.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <span className="text-blue-600">Rp {calculateTotals().total.toLocaleString('id-ID')}</span>
                   </div>
                 </div>
               </div>

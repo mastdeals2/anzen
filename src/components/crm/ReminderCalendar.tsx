@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Calendar, ChevronLeft, ChevronRight, Clock, CheckCircle, AlertCircle, Plus, Users } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, Clock, CheckCircle, AlertCircle, Plus } from 'lucide-react';
 import { Modal } from '../Modal';
 
 interface Reminder {
@@ -19,63 +19,22 @@ interface Reminder {
   } | null;
 }
 
-interface Appointment {
-  id: string;
-  activity_type: string;
-  subject: string;
-  description: string | null;
-  follow_up_date: string;
-  is_completed: boolean;
-  participants: string[];
-  customer_id: string | null;
-  crm_contacts?: {
-    company_name: string;
-  };
-  user_profiles?: {
-    full_name: string;
-  };
-}
-
 interface ReminderCalendarProps {
   onReminderCreated?: () => void;
 }
 
 export function ReminderCalendar({ onReminderCreated }: ReminderCalendarProps) {
   const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [view, setView] = useState<'month' | 'week' | 'list'>('month');
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedReminder, setSelectedReminder] = useState<Reminder | null>(null);
-  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [participantDetails, setParticipantDetails] = useState<{id: string, full_name: string}[]>([]);
 
   useEffect(() => {
     loadReminders();
-    loadAppointments();
   }, [currentDate, view]);
-
-  useEffect(() => {
-    if (selectedAppointment?.participants && selectedAppointment.participants.length > 0) {
-      loadParticipantDetails(selectedAppointment.participants);
-    }
-  }, [selectedAppointment]);
-
-  const loadParticipantDetails = async (participantIds: string[]) => {
-    try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('id, full_name')
-        .in('id', participantIds);
-
-      if (error) throw error;
-      setParticipantDetails(data || []);
-    } catch (error) {
-      console.error('Error loading participants:', error);
-    }
-  };
 
   const loadReminders = async () => {
     try {
@@ -106,36 +65,6 @@ export function ReminderCalendar({ onReminderCreated }: ReminderCalendarProps) {
       console.error('Error loading reminders:', error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadAppointments = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      let query = supabase
-        .from('crm_activities')
-        .select('*, user_profiles!crm_activities_created_by_fkey(full_name), crm_contacts!crm_activities_customer_id_fkey(company_name)')
-        .in('activity_type', ['meeting', 'video_call', 'phone_call'])
-        .not('follow_up_date', 'is', null)
-        .or(`created_by.eq.${user.id},participants.cs.{${user.id}}`)
-        .order('follow_up_date', { ascending: true });
-
-      if (view === 'month') {
-        const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-        const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-        query = query
-          .gte('follow_up_date', startOfMonth.toISOString())
-          .lte('follow_up_date', endOfMonth.toISOString());
-      }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-      setAppointments(data || []);
-    } catch (error) {
-      console.error('Error loading appointments:', error);
     }
   };
 
@@ -190,15 +119,6 @@ export function ReminderCalendar({ onReminderCreated }: ReminderCalendarProps) {
       return reminderDate.getDate() === date.getDate() &&
              reminderDate.getMonth() === date.getMonth() &&
              reminderDate.getFullYear() === date.getFullYear();
-    });
-  };
-
-  const getAppointmentsForDate = (date: Date) => {
-    return appointments.filter(a => {
-      const appointmentDate = new Date(a.follow_up_date);
-      return appointmentDate.getDate() === date.getDate() &&
-             appointmentDate.getMonth() === date.getMonth() &&
-             appointmentDate.getFullYear() === date.getFullYear();
     });
   };
 
@@ -263,9 +183,7 @@ export function ReminderCalendar({ onReminderCreated }: ReminderCalendarProps) {
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
       const dayReminders = getRemindersForDate(date);
-      const dayAppointments = getAppointmentsForDate(date);
       const isToday = date.toDateString() === new Date().toDateString();
-      const allItems = [...dayReminders, ...dayAppointments];
 
       days.push(
         <div
@@ -276,9 +194,6 @@ export function ReminderCalendar({ onReminderCreated }: ReminderCalendarProps) {
             if (dayReminders.length > 0) {
               setSelectedReminder(dayReminders[0]);
               setModalOpen(true);
-            } else if (dayAppointments.length > 0) {
-              setSelectedAppointment(dayAppointments[0]);
-              setModalOpen(true);
             }
           }}
         >
@@ -286,24 +201,7 @@ export function ReminderCalendar({ onReminderCreated }: ReminderCalendarProps) {
             {day}
           </div>
           <div className="space-y-1">
-            {dayAppointments.map((appointment) => {
-              const time = new Date(appointment.follow_up_date).toLocaleTimeString('en-US', {
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false
-              });
-              const companyName = appointment.crm_contacts?.company_name || 'No Customer';
-              return (
-                <div
-                  key={appointment.id}
-                  className={`text-xs p-1 rounded border bg-purple-100 text-purple-800 border-purple-200 truncate ${appointment.is_completed ? 'opacity-50 line-through' : ''}`}
-                  title={`${time} - ${companyName}`}
-                >
-                  📅 {time} - {companyName}
-                </div>
-              );
-            })}
-            {dayReminders.map((reminder) => (
+            {dayReminders.slice(0, 3).map((reminder) => (
               <div
                 key={reminder.id}
                 className={`text-xs p-1 rounded border ${reminderTypeColors[reminder.reminder_type as keyof typeof reminderTypeColors]} truncate ${reminder.is_completed ? 'opacity-50 line-through' : ''}`}
@@ -312,6 +210,11 @@ export function ReminderCalendar({ onReminderCreated }: ReminderCalendarProps) {
                 {reminder.title}
               </div>
             ))}
+            {dayReminders.length > 3 && (
+              <div className="text-xs text-gray-500 font-medium">
+                +{dayReminders.length - 3} more
+              </div>
+            )}
           </div>
         </div>
       );
@@ -495,9 +398,8 @@ export function ReminderCalendar({ onReminderCreated }: ReminderCalendarProps) {
         onClose={() => {
           setModalOpen(false);
           setSelectedReminder(null);
-          setSelectedAppointment(null);
         }}
-        title={selectedReminder ? "Reminder Details" : "Appointment Details"}
+        title="Reminder Details"
       >
         {selectedReminder && (
           <div className="space-y-4">
@@ -548,59 +450,6 @@ export function ReminderCalendar({ onReminderCreated }: ReminderCalendarProps) {
               >
                 <CheckCircle className="w-4 h-4" />
                 {selectedReminder.is_completed ? 'Mark Incomplete' : 'Mark Complete'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {selectedAppointment && (
-          <div className="space-y-4">
-            <div className="border-l-4 border-blue-500 bg-blue-50 p-4 rounded">
-              <h3 className="text-base font-semibold text-gray-900">{selectedAppointment.subject}</h3>
-              {selectedAppointment.crm_contacts && (
-                <p className="text-sm font-medium text-blue-600 mt-1">
-                  {selectedAppointment.crm_contacts.company_name}
-                </p>
-              )}
-              <p className="text-sm text-gray-600 mt-1 capitalize">
-                {selectedAppointment.activity_type.replace('_', ' ')}
-              </p>
-              <p className="text-sm font-medium mt-1 flex items-center gap-1">
-                <Clock className="w-4 h-4" />
-                {new Date(selectedAppointment.follow_up_date).toLocaleString('en-US', {
-                  weekday: 'short',
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </p>
-            </div>
-
-            {selectedAppointment.description && (
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedAppointment.description}</p>
-            )}
-
-            {selectedAppointment.participants && selectedAppointment.participants.length > 0 && (
-              <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-gray-500" />
-                <div className="flex flex-wrap gap-1">
-                  {participantDetails.map(participant => (
-                    <span key={participant.id} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
-                      {participant.full_name}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="flex justify-end pt-4 border-t">
-              <button
-                onClick={() => setModalOpen(false)}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
-              >
-                Close
               </button>
             </div>
           </div>

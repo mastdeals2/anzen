@@ -66,16 +66,17 @@ export function Dashboard() {
 
       const [
         productsResult,
-        productsWithStockResult,
+        batchesResult,
         customersResult,
         invoicesResult,
         activitiesResult,
+        settings,
         pendingSalesOrdersResult,
         pendingDCResult,
         overdueInvoicesResult,
       ] = await Promise.all([
         supabase.from('products').select('id', { count: 'exact', head: true }).eq('is_active', true),
-        supabase.from('products').select('id, min_stock_level, current_stock').eq('is_active', true),
+        supabase.from('batches').select('current_stock, expiry_date').eq('is_active', true),
         supabase.from('customers').select('id', { count: 'exact', head: true }).eq('is_active', true),
         supabase
           .from('sales_invoices')
@@ -87,6 +88,10 @@ export function Dashboard() {
           .select('id', { count: 'exact' })
           .eq('is_completed', false)
           .not('follow_up_date', 'is', null),
+        supabase
+          .from('app_settings')
+          .select('low_stock_threshold')
+          .maybeSingle(),
         supabase
           .from('sales_orders')
           .select('id', { count: 'exact', head: true })
@@ -102,11 +107,8 @@ export function Dashboard() {
           .lt('due_date', new Date().toISOString().split('T')[0]),
       ]);
 
-      const lowStockCount = productsWithStockResult.data?.filter(p =>
-        p.min_stock_level > 0 && p.current_stock < p.min_stock_level
-      ).length || 0;
-
-      const batchesResult = await supabase.from('batches').select('current_stock, expiry_date').eq('is_active', true);
+      const lowStockThreshold = settings?.data?.low_stock_threshold || 100;
+      const lowStockCount = batchesResult.data?.filter(b => b.current_stock < lowStockThreshold).length || 0;
 
       const thirtyDaysFromNow = new Date();
       thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
@@ -178,7 +180,7 @@ export function Dashboard() {
     approvalCards.push({
       title: 'Overdue Invoices',
       value: stats.overdueInvoicesCount,
-      subtitle: `Rp ${stats.overdueInvoicesAmount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      subtitle: `Rp ${stats.overdueInvoicesAmount.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
       icon: AlertTriangle,
       color: 'red-gradient',
       link: 'sales'

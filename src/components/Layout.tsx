@@ -67,7 +67,7 @@ export function Layout({ children }: LayoutProps) {
     { id: 'command-center', label: 'Command Center', icon: Zap, roles: ['admin', 'sales'] },
     { id: 'tasks', label: 'Tasks', icon: CheckSquare, roles: ['admin', 'accounts', 'sales', 'warehouse'] },
     { id: 'inventory', label: t('nav.inventory'), icon: Warehouse, roles: ['admin', 'warehouse'] },
-    { id: 'settings', label: t('nav.settings'), icon: Settings, roles: ['admin', 'accounts', 'sales'] },
+    { id: 'settings', label: t('nav.settings'), icon: Settings, roles: ['admin'] },
   ];
 
   const visibleMenuItems = menuItems.filter(item =>
@@ -115,11 +115,9 @@ export function Layout({ children }: LayoutProps) {
             const Icon = item.icon;
             const isActive = currentPage === item.id;
             return (
-              <a
+              <button
                 key={item.id}
-                href={`#${item.id}`}
-                onClick={(e) => {
-                  e.preventDefault();
+                onClick={() => {
                   setCurrentPage(item.id);
                   setSidebarOpen(false);
                 }}
@@ -140,7 +138,7 @@ export function Layout({ children }: LayoutProps) {
                     {item.label}
                   </span>
                 )}
-              </a>
+              </button>
             );
           })}
         </nav>

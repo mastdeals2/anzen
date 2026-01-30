@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { Upload, X, File, FileText, Image as ImageIcon, AlertCircle, Clipboard } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Upload, X, File, FileText, Image as ImageIcon, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface UploadedFile {
@@ -44,60 +44,11 @@ const DOCUMENT_TYPES = [
 export function FileUpload({ batchId, existingFiles = [], onFilesChange, disabled = false }: FileUploadProps) {
   const [files, setFiles] = useState<UploadedFile[]>(existingFiles);
   const [isDragging, setIsDragging] = useState(false);
-  const [showPasteHint, setShowPasteHint] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const dropZoneRef = useRef<HTMLDivElement>(null);
 
   const updateFiles = (newFiles: UploadedFile[]) => {
     setFiles(newFiles);
     onFilesChange?.(newFiles);
-  };
-
-  useEffect(() => {
-    const handlePaste = (e: ClipboardEvent) => {
-      if (disabled) return;
-
-      const items = e.clipboardData?.items;
-      if (!items) return;
-
-      const pastedFiles: File[] = [];
-
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-
-        if (item.type.indexOf('image') !== -1) {
-          e.preventDefault();
-          const blob = item.getAsFile();
-          if (blob) {
-            const fileName = `pasted-image-${Date.now()}.png`;
-            const file = new File([blob], fileName, { type: blob.type });
-            pastedFiles.push(file);
-          }
-        }
-      }
-
-      if (pastedFiles.length > 0) {
-        const fileList = new DataTransfer();
-        pastedFiles.forEach(file => fileList.items.add(file));
-        handleFileSelect(fileList.files);
-
-        setShowPasteHint(true);
-        setTimeout(() => setShowPasteHint(false), 2000);
-      }
-    };
-
-    document.addEventListener('paste', handlePaste);
-    return () => document.removeEventListener('paste', handlePaste);
-  }, [disabled, files]);
-
-  const handleMouseEnter = () => {
-    if (!disabled) {
-      setShowPasteHint(true);
-    }
-  };
-
-  const handleMouseLeave = () => {
-    setShowPasteHint(false);
   };
 
   const handleFileSelect = (selectedFiles: FileList | null) => {
@@ -203,13 +154,10 @@ export function FileUpload({ batchId, existingFiles = [], onFilesChange, disable
   return (
     <div className="space-y-4">
       <div
-        ref={dropZoneRef}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors relative ${
+        className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
           isDragging
             ? 'border-blue-500 bg-blue-50'
             : 'border-gray-300 hover:border-gray-400'
@@ -220,17 +168,9 @@ export function FileUpload({ batchId, existingFiles = [], onFilesChange, disable
         <p className="text-sm text-gray-600 mb-1">
           <span className="font-medium text-blue-600">Click to upload</span> or drag and drop
         </p>
-        <p className="text-xs text-gray-500 mb-2">
+        <p className="text-xs text-gray-500">
           PDF, JPG, PNG, XLSX, DOCX (max 10MB)
         </p>
-
-        {showPasteHint && (
-          <div className="flex items-center justify-center gap-2 text-xs text-green-600 font-medium animate-pulse">
-            <Clipboard className="w-4 h-4" />
-            <span>Press Ctrl+V to paste images from clipboard</span>
-          </div>
-        )}
-
         <input
           ref={fileInputRef}
           type="file"

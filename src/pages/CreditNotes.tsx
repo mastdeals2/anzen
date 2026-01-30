@@ -437,32 +437,32 @@ export function CreditNotes() {
     {
       key: 'credit_note_number',
       label: 'Credit Note #',
-      render: (value: any, cn: CreditNote) => cn.credit_note_number || 'Pending'
+      render: (cn: CreditNote) => cn.credit_note_number || 'Pending'
     },
     {
       key: 'credit_note_date',
       label: 'Date',
-      render: (value: any, cn: CreditNote) => new Date(cn.credit_note_date).toLocaleDateString()
+      render: (cn: CreditNote) => new Date(cn.credit_note_date).toLocaleDateString()
     },
     {
       key: 'customer',
       label: 'Customer',
-      render: (value: any, cn: CreditNote) => cn.customers?.company_name || 'N/A'
+      render: (cn: CreditNote) => cn.customers?.company_name || 'N/A'
     },
     {
       key: 'original_invoice_number',
       label: 'Original Invoice',
-      render: (value: any, cn: CreditNote) => cn.original_invoice_number || 'N/A'
+      render: (cn: CreditNote) => cn.original_invoice_number || 'N/A'
     },
     {
       key: 'total_amount',
       label: 'Amount',
-      render: (value: any, cn: CreditNote) => `${cn.currency} ${cn.total_amount.toLocaleString('id-ID', { minimumFractionDigits: 2 })}`
+      render: (cn: CreditNote) => `${cn.currency} ${cn.total_amount.toLocaleString('id-ID', { minimumFractionDigits: 2 })}`
     },
     {
       key: 'status',
       label: 'Status',
-      render: (value: any, cn: CreditNote) => (
+      render: (cn: CreditNote) => (
         <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
           cn.status === 'approved' ? 'bg-green-100 text-green-800' :
           cn.status === 'rejected' ? 'bg-red-100 text-red-800' :
@@ -475,7 +475,7 @@ export function CreditNotes() {
     {
       key: 'reason',
       label: 'Reason',
-      render: (value: any, cn: CreditNote) => (
+      render: (cn: CreditNote) => (
         <span className="text-sm text-gray-600 truncate max-w-xs block">
           {cn.reason}
         </span>
@@ -603,7 +603,7 @@ export function CreditNotes() {
                   <option value="">Select Invoice</option>
                   {invoices.map((invoice) => (
                     <option key={invoice.id} value={invoice.id}>
-                      {invoice.invoice_number} - {new Date(invoice.invoice_date).toLocaleDateString()} - Rp {invoice.total_amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {invoice.invoice_number} - {new Date(invoice.invoice_date).toLocaleDateString()} - Rp {invoice.total_amount.toLocaleString('id-ID')}
                     </option>
                   ))}
                 </select>

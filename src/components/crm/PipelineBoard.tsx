@@ -233,7 +233,7 @@ export function PipelineBoard({ canManage, onInquiryClick }: PipelineBoardProps)
                 </div>
                 {stageValue > 0 && (
                   <div className="text-xs text-gray-600">
-                    Value: Rp {stageValue.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    Value: Rp {stageValue.toLocaleString('id-ID')}
                   </div>
                 )}
               </div>
@@ -293,7 +293,7 @@ export function PipelineBoard({ canManage, onInquiryClick }: PipelineBoardProps)
                         {inquiry.estimated_value && inquiry.estimated_value > 0 && (
                           <div className="flex items-center gap-1 text-xs text-green-600 font-medium">
                             <DollarSign className="w-3 h-3" />
-                            <span>Rp {inquiry.estimated_value.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            <span>Rp {inquiry.estimated_value.toLocaleString('id-ID')}</span>
                           </div>
                         )}
                       </div>

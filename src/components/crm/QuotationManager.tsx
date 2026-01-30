@@ -418,7 +418,7 @@ export function QuotationManager({ leadId, customerId, canManage }: QuotationMan
       label: 'Total Amount',
       render: (q: Quotation) => (
         <span className="font-semibold text-blue-600">
-          Rp {q.total_amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          Rp {q.total_amount.toLocaleString('id-ID')}
         </span>
       )
     },
@@ -638,15 +638,15 @@ export function QuotationManager({ leadId, customerId, canManage }: QuotationMan
           <div className="bg-blue-50 p-3 rounded-lg">
             <div className="flex justify-between text-sm mb-1">
               <span>Subtotal:</span>
-              <span className="font-medium">Rp {totals.subtotal.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className="font-medium">Rp {totals.subtotal.toLocaleString('id-ID')}</span>
             </div>
             <div className="flex justify-between text-sm mb-1">
               <span>Tax:</span>
-              <span className="font-medium">Rp {totals.taxAmount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className="font-medium">Rp {totals.taxAmount.toLocaleString('id-ID')}</span>
             </div>
             <div className="flex justify-between text-lg font-bold border-t border-blue-200 pt-2 mt-2">
               <span>Total:</span>
-              <span className="text-blue-600">Rp {totals.total.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className="text-blue-600">Rp {totals.total.toLocaleString('id-ID')}</span>
             </div>
           </div>
 

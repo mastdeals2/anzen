@@ -6,7 +6,7 @@ type Language = 'en' | 'id';
 interface LanguageContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
-  t: any;
+  t: (key: string) => string;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -26,7 +26,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('language', lang);
   };
 
-  const translateFunction = (key: string): string => {
+  const t = (key: string): string => {
     const keys = key.split('.');
     let value: any = translations[language];
 
@@ -40,8 +40,6 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
     return typeof value === 'string' ? value : key;
   };
-
-  const t = Object.assign(translateFunction, translations[language]);
 
   return (
     <LanguageContext.Provider value={{ language, setLanguage, t }}>

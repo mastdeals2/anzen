@@ -70,17 +70,12 @@ export function BankReconciliation({ canManage }: BankReconciliationProps) {
     if (!selectedBank) return;
     setLoading(true);
     try {
-      // Calculate next day for inclusive end date filtering
-      const endDatePlusOne = new Date(dateRange.end);
-      endDatePlusOne.setDate(endDatePlusOne.getDate() + 1);
-      const endDateStr = endDatePlusOne.toISOString().split('T')[0];
-
       const { data, error } = await supabase
         .from('bank_statement_lines')
         .select('*')
         .eq('bank_account_id', selectedBank)
         .gte('transaction_date', dateRange.start)
-        .lt('transaction_date', endDateStr)
+        .lte('transaction_date', dateRange.end)
         .order('transaction_date', { ascending: false });
       
       if (error) throw error;
@@ -129,7 +124,7 @@ export function BankReconciliation({ canManage }: BankReconciliationProps) {
           }
 
           const { data: { user } } = await supabase.auth.getUser();
-
+          
           const insertData = lines.map(line => ({
             bank_account_id: selectedBank,
             transaction_date: line.date,
@@ -142,31 +137,15 @@ export function BankReconciliation({ canManage }: BankReconciliationProps) {
             created_by: user?.id,
           }));
 
-          // Insert transactions, skip duplicates based on transaction_hash
-          const { data: inserted, error } = await supabase
+          const { error } = await supabase
             .from('bank_statement_lines')
-            .upsert(insertData, {
-              onConflict: 'transaction_hash',
-              ignoreDuplicates: true
-            })
-            .select();
+            .insert(insertData);
 
-          if (error) {
-            console.error('Insert error:', error);
-            throw error;
-          }
-
-          const insertedCount = inserted?.length || 0;
-          const duplicateCount = lines.length - insertedCount;
+          if (error) throw error;
 
           await autoMatchTransactions();
           loadStatementLines();
-
-          if (duplicateCount > 0) {
-            alert(`Successfully imported ${insertedCount} new transactions.\n${duplicateCount} duplicate transactions were skipped.`);
-          } else {
-            alert(`Successfully imported ${insertedCount} transactions`);
-          }
+          alert(`Successfully imported ${lines.length} transactions`);
         } catch (err: any) {
           console.error('Error parsing file:', err);
           alert('Failed to parse file: ' + err.message);
@@ -267,26 +246,148 @@ export function BankReconciliation({ canManage }: BankReconciliationProps) {
   const autoMatchTransactions = async () => {
     try {
       setLoading(true);
+      const { data: unmatched, error: fetchError } = await supabase
+        .from('bank_statement_lines')
+        .select('*')
+        .eq('bank_account_id', selectedBank)
+        .eq('reconciliation_status', 'unmatched');
 
-      // Use the database function that enforces 7-day date tolerance
-      const { data, error } = await supabase.rpc('auto_match_smart');
-
-      if (error) throw error;
-
-      const result = data?.[0];
-      const matchedCount = result?.matched_count || 0;
-      const suggestedCount = result?.suggested_count || 0;
-      const skippedCount = result?.skipped_count || 0;
-
-      let message = `✅ Auto-match complete!\n\n`;
-      message += `✓ Matched (85%+ confidence): ${matchedCount}\n`;
-      message += `⚠ Needs Review (70-84%): ${suggestedCount}\n`;
-      if (skippedCount > 0) {
-        message += `⏭ Skipped (already matched): ${skippedCount}\n`;
+      if (fetchError) throw fetchError;
+      if (!unmatched || unmatched.length === 0) {
+        alert('No unmatched transactions to process');
+        return;
       }
-      message += `\n🔒 Date tolerance: ±7 days maximum`;
 
-      alert(message);
+      const dateStart = new Date(dateRange.start);
+      dateStart.setDate(dateStart.getDate() - 5);
+      const dateEnd = new Date(dateRange.end);
+      dateEnd.setDate(dateEnd.getDate() + 5);
+
+      const [receiptsRes, paymentsRes, expensesRes] = await Promise.all([
+        supabase
+          .from('receipt_vouchers')
+          .select('id, voucher_number, voucher_date, amount, description, customers(company_name)')
+          .gte('voucher_date', dateStart.toISOString().split('T')[0])
+          .lte('voucher_date', dateEnd.toISOString().split('T')[0]),
+        supabase
+          .from('payment_vouchers')
+          .select('id, voucher_number, voucher_date, amount, description, suppliers(company_name)')
+          .gte('voucher_date', dateStart.toISOString().split('T')[0])
+          .lte('voucher_date', dateEnd.toISOString().split('T')[0]),
+        supabase
+          .from('finance_expenses')
+          .select('id, voucher_number, expense_date, amount, description, expense_category')
+          .gte('expense_date', dateStart.toISOString().split('T')[0])
+          .lte('expense_date', dateEnd.toISOString().split('T')[0])
+      ]);
+
+      if (receiptsRes.error) console.error('Receipts error:', receiptsRes.error);
+      if (paymentsRes.error) console.error('Payments error:', paymentsRes.error);
+      if (expensesRes.error) console.error('Expenses error:', expensesRes.error);
+
+      const receipts = (receiptsRes.data || []).map(r => ({
+        id: r.id,
+        type: 'receipt' as const,
+        date: r.voucher_date,
+        amount: r.amount,
+        reference: r.voucher_number,
+        description: `Receipt from ${(r.customers as any)?.company_name || 'Customer'} - ${r.description || ''}`,
+      }));
+
+      const payments = (paymentsRes.data || []).map(p => ({
+        id: p.id,
+        type: 'payment' as const,
+        date: p.voucher_date,
+        amount: p.amount,
+        reference: p.voucher_number,
+        description: `Payment to ${(p.suppliers as any)?.company_name || 'Supplier'} - ${p.description || ''}`,
+      }));
+
+      const expenses = (expensesRes.data || []).map(e => ({
+        id: e.id,
+        type: 'expense' as const,
+        date: e.expense_date,
+        amount: e.amount,
+        reference: e.voucher_number || '',
+        description: `Expense: ${e.expense_category} - ${e.description || ''}`,
+      }));
+
+      const allSystemTransactions = [...receipts, ...payments, ...expenses];
+      console.log('Auto-match debug:', {
+        unmatchedCount: unmatched.length,
+        receiptsCount: receipts.length,
+        paymentsCount: payments.length,
+        expensesCount: expenses.length,
+        totalSystemTxns: allSystemTransactions.length
+      });
+
+      let matchedCount = 0;
+      let suggestedCount = 0;
+
+      for (const line of unmatched) {
+        const amount = Number(line.debit_amount || line.credit_amount || 0);
+        const lineDate = new Date(line.transaction_date);
+        const lineDesc = (line.description || '') + ' ' + (line.reference || '');
+
+        let bestMatch: any = null;
+        let bestScore = 0;
+
+        for (const txn of allSystemTransactions) {
+          const txnDate = new Date(txn.date);
+          const dateDiff = Math.abs(lineDate.getTime() - txnDate.getTime()) / (1000 * 60 * 60 * 24);
+          const txnAmount = Number(txn.amount);
+          const amountDiff = Math.abs(txnAmount - amount);
+          const amountMatch = amountDiff < 1;
+          const descSimilarity = calculateStringSimilarity(lineDesc, txn.description + ' ' + txn.reference);
+
+          let score = 0;
+          if (amountMatch) score += 60;
+          else if (amountDiff < 10000) score += 30;
+          if (dateDiff === 0) score += 30;
+          else if (dateDiff <= 2) score += 20;
+          else if (dateDiff <= 5) score += 10;
+          score += descSimilarity * 10;
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestMatch = txn;
+          }
+        }
+
+        if (bestMatch && bestScore >= 60) {
+          console.log(`Match found for line ${line.id}: score=${bestScore}, amount=${amount}, matchType=${bestMatch.type}`);
+          const updateData: any = {
+            reconciliation_status: bestScore >= 85 ? 'matched' : 'needs_review',
+            matched_entry_id: null,
+            matched_expense_id: null,
+            matched_receipt_id: null,
+            notes: `Auto-matched (${Math.round(bestScore)}% confidence) with ${bestMatch.reference || bestMatch.type}`,
+          };
+
+          if (bestMatch.type === 'receipt') {
+            updateData.matched_receipt_id = bestMatch.id;
+          } else if (bestMatch.type === 'expense') {
+            updateData.matched_expense_id = bestMatch.id;
+          } else if (bestMatch.type === 'payment') {
+            updateData.matched_entry_id = bestMatch.id;
+          }
+
+          const { error: updateError } = await supabase
+            .from('bank_statement_lines')
+            .update(updateData)
+            .eq('id', line.id);
+
+          if (updateError) {
+            console.error('Update error for line:', line.id, updateError);
+          } else {
+            if (bestScore >= 85) matchedCount++;
+            else suggestedCount++;
+          }
+        }
+      }
+
+      loadStatementLines();
+      alert(`Auto-matching completed!\n\n${matchedCount} high-confidence matches (auto-approved)\n${suggestedCount} suggestions (need review)`);
     } catch (err) {
       console.error('Error auto-matching:', err);
       alert('Failed to auto-match transactions');
@@ -502,13 +603,13 @@ export function BankReconciliation({ canManage }: BankReconciliationProps) {
                     <td className="px-3 py-2 text-gray-700 max-w-xs truncate">{line.description}</td>
                     <td className="px-3 py-2 text-gray-500 font-mono text-xs">{line.reference || '-'}</td>
                     <td className="px-3 py-2 text-right text-red-600 font-medium">
-                      {line.debit > 0 ? `Rp ${line.debit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                      {line.debit > 0 ? `Rp ${line.debit.toLocaleString('id-ID')}` : '-'}
                     </td>
                     <td className="px-3 py-2 text-right text-green-600 font-medium">
-                      {line.credit > 0 ? `Rp ${line.credit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                      {line.credit > 0 ? `Rp ${line.credit.toLocaleString('id-ID')}` : '-'}
                     </td>
                     <td className="px-3 py-2 text-right text-gray-900 font-semibold">
-                      Rp {line.balance.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      Rp {line.balance.toLocaleString('id-ID')}
                     </td>
                     <td className="px-3 py-2 text-center">
                       {line.status === 'matched' && (
