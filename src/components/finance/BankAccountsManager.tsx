@@ -12,8 +12,10 @@ interface BankAccount {
   account_type: string;
   currency: string;
   opening_balance: number;
+  opening_balance_date: string;
   current_balance: number;
   is_active: boolean;
+  alias?: string;
 }
 
 interface Props {
@@ -32,6 +34,8 @@ export function BankAccountsManager({ canManage }: Props) {
     account_type: 'current' as 'savings' | 'current' | 'credit_card' | 'other',
     currency: 'IDR',
     opening_balance: 0,
+    opening_balance_date: '2025-01-01',
+    alias: '',
   });
 
   useEffect(() => {
@@ -98,6 +102,8 @@ export function BankAccountsManager({ canManage }: Props) {
       account_type: account.account_type as any,
       currency: account.currency,
       opening_balance: account.opening_balance,
+      opening_balance_date: account.opening_balance_date || '2025-01-01',
+      alias: account.alias || '',
     });
     setModalOpen(true);
   };
@@ -111,6 +117,8 @@ export function BankAccountsManager({ canManage }: Props) {
       account_type: 'current',
       currency: 'IDR',
       opening_balance: 0,
+      opening_balance_date: '2025-01-01',
+      alias: '',
     });
   };
 
@@ -118,8 +126,8 @@ export function BankAccountsManager({ canManage }: Props) {
     { key: 'account_name', label: 'Account Name' },
     { key: 'bank_name', label: 'Bank' },
     { key: 'account_number', label: 'Account #' },
-    { key: 'type', label: 'Type', render: (a: BankAccount) => <span className="capitalize">{a.account_type}</span> },
-    { key: 'balance', label: 'Balance', render: (a: BankAccount) => <span className="font-semibold">Rp {a.current_balance.toLocaleString('id-ID')}</span> },
+    { key: 'type', label: 'Type', render: (a: BankAccount) => <span className="capitalize">{a.account_type || 'current'}</span> },
+    { key: 'balance', label: 'Balance', render: (a: BankAccount) => <span className="font-semibold">Rp {(a.current_balance || 0).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> },
     { key: 'status', label: 'Status', render: (a: BankAccount) => (
       <span className={`px-2 py-1 rounded-full text-xs font-medium ${
         a.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
@@ -188,6 +196,18 @@ export function BankAccountsManager({ canManage }: Props) {
             </div>
 
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Display Alias</label>
+              <input
+                type="text"
+                value={formData.alias}
+                onChange={(e) => setFormData({ ...formData, alias: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., BCA IDR, Mandiri USD"
+              />
+              <p className="text-xs text-gray-500 mt-1">Short name for easier identification in lists</p>
+            </div>
+
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Account Number *</label>
               <input
                 type="text"
@@ -227,15 +247,28 @@ export function BankAccountsManager({ canManage }: Props) {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Opening Balance *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Opening Balance</label>
               <input
                 type="number"
                 value={formData.opening_balance === 0 ? '' : formData.opening_balance}
                 onChange={(e) => setFormData({ ...formData, opening_balance: e.target.value === '' ? 0 : Number(e.target.value) })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                required
                 step="0.01"
+                placeholder="0"
               />
+              <p className="text-xs text-gray-500 mt-1">Leave blank if opening balance is zero</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Opening Balance Date *</label>
+              <input
+                type="date"
+                value={formData.opening_balance_date}
+                onChange={(e) => setFormData({ ...formData, opening_balance_date: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                required
+              />
+              <p className="text-xs text-gray-500 mt-1">Date when the opening balance is effective</p>
             </div>
           </div>
 
