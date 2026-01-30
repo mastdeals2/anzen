@@ -1094,7 +1094,7 @@ export function Sales() {
       key: 'customer',
       label: 'Customer',
       render: (value: any, inv: SalesInvoice) => (
-        <div className="font-medium">{inv.customers?.company_name}</div>
+        <div className="font-medium">{inv.customers?.company_name || 'N/A'}</div>
       )
     },
     {

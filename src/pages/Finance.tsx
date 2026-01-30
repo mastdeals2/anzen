@@ -110,6 +110,20 @@ function FinanceContent() {
     return getFinanceMenu(t);
   }, [t]);
 
+  // Early return if translations not loaded
+  if (!t || !t.finance) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center h-96">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-sm text-gray-600">Loading...</p>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
   const toggleGroup = (groupLabel: string) => {
     setCollapsedGroups(prev => {
       const newSet = new Set(prev);
