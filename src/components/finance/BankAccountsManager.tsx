@@ -126,24 +126,19 @@ export function BankAccountsManager({ canManage }: Props) {
     { key: 'account_name', label: 'Account Name' },
     { key: 'bank_name', label: 'Bank' },
     { key: 'account_number', label: 'Account #' },
-    { key: 'type', label: 'Type', render: (a: BankAccount) => {
-      if (!a) return <span>-</span>;
-      return <span className="capitalize">{a.account_type || 'current'}</span>;
-    }},
-    { key: 'balance', label: 'Balance', render: (a: BankAccount) => {
-      if (!a) return <span>-</span>;
-      return <span className="font-semibold">Rp {(a.current_balance || 0).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
-    }},
-    { key: 'status', label: 'Status', render: (a: BankAccount) => {
-      if (!a) return <span>-</span>;
-      return (
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-          a.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-        }`}>
-          {a.is_active ? 'Active' : 'Inactive'}
-        </span>
-      );
-    }},
+    { key: 'type', label: 'Type', render: (_val: any, account: BankAccount) => (
+      <span className="capitalize">{account.account_type || 'current'}</span>
+    )},
+    { key: 'balance', label: 'Balance', render: (_val: any, account: BankAccount) => (
+      <span className="font-semibold">Rp {(Number(account.current_balance) || 0).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+    )},
+    { key: 'status', label: 'Status', render: (_val: any, account: BankAccount) => (
+      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+        account.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+      }`}>
+        {account.is_active ? 'Active' : 'Inactive'}
+      </span>
+    )},
   ];
 
   return (

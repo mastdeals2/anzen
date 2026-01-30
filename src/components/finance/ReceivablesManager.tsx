@@ -17,30 +17,31 @@ interface SalesInvoice {
   paid_amount?: number;
 }
 
-interface CustomerPayment {
+interface ReceiptVoucher {
   id: string;
-  payment_number: string;
-  payment_date: string;
+  voucher_number: string;
+  voucher_date: string;
   amount: number;
   payment_method: string;
   reference_number: string | null;
-  notes: string | null;
+  description: string | null;
   customers: { company_name: string } | null;
-  sales_invoices: { invoice_number: string } | null;
-  bank_accounts: { account_name: string } | null;
+  bank_accounts: { account_name: string; alias: string | null } | null;
+  allocations?: { allocated_amount: number; sales_invoices: { invoice_number: string } | null }[];
 }
 
 interface BankAccount {
   id: string;
   account_name: string;
   bank_name: string;
+  alias: string | null;
 }
 
 export function ReceivablesManager({ canManage }: { canManage: boolean }) {
   const { setCurrentPage } = useNavigation();
   const [view, setView] = useState<'invoices' | 'payments'>('invoices');
   const [invoices, setInvoices] = useState<SalesInvoice[]>([]);
-  const [payments, setPayments] = useState<CustomerPayment[]>([]);
+  const [payments, setPayments] = useState<ReceiptVoucher[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -67,30 +68,95 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
           .in('payment_status', ['pending', 'partial'])
           .order('due_date', { ascending: true }),
         supabase
-          .from('customer_payments')
-          .select('*, customers(company_name), sales_invoices(invoice_number), bank_accounts(account_name)')
-          .order('payment_date', { ascending: false })
+          .from('receipt_vouchers')
+          .select(`
+            *,
+            customers(company_name),
+            bank_accounts(account_name, alias)
+          `)
+          .order('voucher_date', { ascending: false })
           .limit(50),
         supabase
           .from('bank_accounts')
-          .select('id, account_name, bank_name')
+          .select('id, account_name, bank_name, alias')
           .eq('is_active', true)
           .order('account_name'),
       ]);
 
-      if (invoicesRes.error) throw invoicesRes.error;
-      if (paymentsRes.error) throw paymentsRes.error;
-      if (banksRes.error) throw banksRes.error;
+      if (invoicesRes.error) {
+        console.error('Error loading invoices:', invoicesRes.error);
+        throw invoicesRes.error;
+      }
+      if (paymentsRes.error) {
+        console.error('Error loading payments:', paymentsRes.error);
+        throw paymentsRes.error;
+      }
+      if (banksRes.error) {
+        console.error('Error loading banks:', banksRes.error);
+        throw banksRes.error;
+      }
 
-      const invoicesWithPaid = await Promise.all((invoicesRes.data || []).map(async (inv) => {
-        const { data: paidData } = await supabase
-          .rpc('get_invoice_paid_amount', { p_invoice_id: inv.id });
-        const paidAmount = paidData || 0;
-        return { ...inv, paid_amount: paidAmount };
+      // Calculate paid_amount for each invoice
+      const invoicesWithPaidAmount = await Promise.all((invoicesRes.data || []).map(async (invoice) => {
+        try {
+          const { data: allocations, error: allocError } = await supabase
+            .from('voucher_allocations')
+            .select('allocated_amount')
+            .eq('sales_invoice_id', invoice.id)
+            .eq('voucher_type', 'receipt');
+
+          if (allocError) {
+            console.error('Error loading allocations for invoice:', invoice.id, allocError);
+          }
+
+          const paid_amount = allocations?.reduce((sum, alloc) => sum + (Number(alloc.allocated_amount) || 0), 0) || 0;
+          return {
+            ...invoice,
+            paid_amount,
+            customers: invoice.customers || null
+          };
+        } catch (err) {
+          console.error('Error processing invoice:', invoice.id, err);
+          return {
+            ...invoice,
+            paid_amount: 0,
+            customers: invoice.customers || null
+          };
+        }
       }));
 
-      setInvoices(invoicesWithPaid);
-      setPayments(paymentsRes.data || []);
+      // Get allocations for each receipt voucher
+      const paymentsWithAllocations = await Promise.all((paymentsRes.data || []).map(async (voucher) => {
+        try {
+          const { data: allocations, error: allocError } = await supabase
+            .from('voucher_allocations')
+            .select('allocated_amount, sales_invoices(invoice_number)')
+            .eq('receipt_voucher_id', voucher.id)
+            .eq('voucher_type', 'receipt');
+
+          if (allocError) {
+            console.error('Error loading allocations for voucher:', voucher.id, allocError);
+          }
+
+          return {
+            ...voucher,
+            allocations: allocations || [],
+            customers: voucher.customers || null,
+            bank_accounts: voucher.bank_accounts || null
+          };
+        } catch (err) {
+          console.error('Error processing voucher:', voucher.id, err);
+          return {
+            ...voucher,
+            allocations: [],
+            customers: voucher.customers || null,
+            bank_accounts: voucher.bank_accounts || null
+          };
+        }
+      }));
+
+      setInvoices(invoicesWithPaidAmount);
+      setPayments(paymentsWithAllocations);
       setBankAccounts(banksRes.data || []);
     } catch (error) {
       console.error('Error loading data:', error);
@@ -130,17 +196,41 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
         .in('payment_status', ['pending', 'partial'])
         .order('invoice_date', { ascending: true });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error loading customer invoices:', error);
+        throw error;
+      }
 
-      // Calculate paid amounts
-      const invoicesWithBalance = await Promise.all((custInvoices || []).map(async (inv) => {
-        const { data: paidData } = await supabase
-          .rpc('get_invoice_paid_amount', { p_invoice_id: inv.id });
-        const paidAmount = paidData || 0;
-        return { ...inv, paid_amount: paidAmount };
+      // Calculate paid_amount for each invoice
+      const invoicesWithPaidAmount = await Promise.all((custInvoices || []).map(async (inv) => {
+        try {
+          const { data: allocations, error: allocError } = await supabase
+            .from('voucher_allocations')
+            .select('allocated_amount')
+            .eq('sales_invoice_id', inv.id)
+            .eq('voucher_type', 'receipt');
+
+          if (allocError) {
+            console.error('Error loading allocations for invoice:', inv.id, allocError);
+          }
+
+          const paid_amount = allocations?.reduce((sum, alloc) => sum + (Number(alloc.allocated_amount) || 0), 0) || 0;
+          return {
+            ...inv,
+            paid_amount,
+            customers: inv.customers || null
+          };
+        } catch (err) {
+          console.error('Error processing invoice:', inv.id, err);
+          return {
+            ...inv,
+            paid_amount: 0,
+            customers: inv.customers || null
+          };
+        }
       }));
 
-      setCustomerInvoices(invoicesWithBalance);
+      setCustomerInvoices(invoicesWithPaidAmount);
 
       // Pre-select the clicked invoice
       setSelectedAllocations({
@@ -173,41 +263,50 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      // 1. Insert payment record
-      const { data: payment, error: paymentError } = await supabase
-        .from('customer_payments')
+      // 1. Generate voucher number
+      const year = new Date().getFullYear().toString().slice(-2);
+      const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+      const { count } = await supabase
+        .from('receipt_vouchers')
+        .select('*', { count: 'exact', head: true })
+        .like('voucher_number', `RV${year}${month}%`);
+
+      const voucherNumber = `RV${year}${month}-${String((count || 0) + 1).padStart(4, '0')}`;
+
+      // 2. Insert receipt voucher
+      const { data: voucher, error: voucherError } = await supabase
+        .from('receipt_vouchers')
         .insert([{
-          payment_number: formData.payment_number,
+          voucher_number: voucherNumber,
+          voucher_date: formData.payment_date,
           customer_id: selectedInvoice.customer_id,
-          invoice_id: null,
-          payment_date: formData.payment_date,
-          amount: formData.amount,
           payment_method: formData.payment_method,
           bank_account_id: formData.bank_account_id || null,
           reference_number: formData.reference_number || null,
-          notes: formData.notes || null,
+          amount: formData.amount,
+          description: formData.notes || null,
           created_by: user.id,
         }])
         .select()
         .single();
 
-      if (paymentError) throw paymentError;
+      if (voucherError) throw voucherError;
 
-      // 2. Insert allocation records
-      const allocations = Object.entries(selectedAllocations)
-        .filter(([_, amount]) => amount > 0)
-        .map(([invoiceId, amount]) => ({
-          invoice_id: invoiceId,
-          payment_id: payment.id,
+      // 3. Insert invoice payment allocations using voucher_allocations table
+      for (const [invoiceId, amount] of Object.entries(selectedAllocations)) {
+        if (amount <= 0) continue;
+
+        // Create allocation in voucher_allocations table (this will trigger auto-update of invoice)
+        await supabase.from('voucher_allocations').insert({
+          voucher_type: 'receipt',
+          receipt_voucher_id: voucher.id,
+          sales_invoice_id: invoiceId,
           allocated_amount: amount,
-          created_by: user.id,
-        }));
+        });
 
-      const { error: allocError } = await supabase
-        .from('invoice_payment_allocations')
-        .insert(allocations);
-
-      if (allocError) throw allocError;
+        // Note: Invoice payment status is automatically updated by database trigger
+        // No need to manually update payment_status, paid_amount, or balance_amount
+      }
 
       setModalOpen(false);
       setSelectedInvoice(null);
@@ -215,7 +314,7 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
       setSelectedAllocations({});
       resetForm();
       loadData();
-      alert('Payment recorded and allocated successfully!');
+      alert(`Receipt voucher ${voucherNumber} created and allocated successfully!`);
     } catch (error: any) {
       console.error('Error recording payment:', error);
       alert(`Failed to record payment: ${error.message}`);
@@ -238,7 +337,7 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
     {
       key: 'invoice_number',
       label: 'Invoice #',
-      render: (inv: SalesInvoice) => (
+      render: (_val: any, inv: SalesInvoice) => (
         <button
           onClick={() => setCurrentPage('sales')}
           className="text-blue-600 hover:underline font-medium"
@@ -250,17 +349,17 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
     {
       key: 'customer',
       label: 'Customer',
-      render: (inv: SalesInvoice) => inv.customers?.company_name || 'N/A'
+      render: (_val: any, inv: SalesInvoice) => inv.customers?.company_name || 'N/A'
     },
     {
       key: 'invoice_date',
       label: 'Date',
-      render: (inv: SalesInvoice) => new Date(inv.invoice_date).toLocaleDateString()
+      render: (_val: any, inv: SalesInvoice) => new Date(inv.invoice_date).toLocaleDateString()
     },
     {
       key: 'due_date',
       label: 'Due Date',
-      render: (inv: SalesInvoice) => {
+      render: (_val: any, inv: SalesInvoice) => {
         const dueDate = new Date(inv.due_date);
         const today = new Date();
         const isOverdue = dueDate < today && inv.payment_status !== 'paid';
@@ -274,30 +373,30 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
     {
       key: 'total_amount',
       label: 'Amount',
-      render: (inv: SalesInvoice) => `Rp ${inv.total_amount.toLocaleString('id-ID')}`
+      render: (_val: any, inv: SalesInvoice) => `Rp ${inv.total_amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     },
     {
       key: 'paid',
       label: 'Paid',
-      render: (inv: SalesInvoice) => (
+      render: (_val: any, inv: SalesInvoice) => (
         <span className="text-green-600">
-          Rp {(inv.paid_amount || 0).toLocaleString('id-ID')}
+          Rp {(inv.paid_amount || 0).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </span>
       )
     },
     {
       key: 'balance',
       label: 'Balance',
-      render: (inv: SalesInvoice) => (
+      render: (_val: any, inv: SalesInvoice) => (
         <span className="font-semibold text-red-600">
-          Rp {(inv.total_amount - (inv.paid_amount || 0)).toLocaleString('id-ID')}
+          Rp {(inv.total_amount - (inv.paid_amount || 0)).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </span>
       )
     },
     {
       key: 'status',
       label: 'Status',
-      render: (inv: SalesInvoice) => (
+      render: (_val: any, inv: SalesInvoice) => (
         <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
           inv.payment_status === 'partial' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'
         }`}>
@@ -309,45 +408,53 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
 
   const paymentColumns = [
     {
-      key: 'payment_number',
-      label: 'Payment #',
-      render: (pay: CustomerPayment) => pay.payment_number
+      key: 'voucher_number',
+      label: 'Voucher #',
+      render: (_val: any, pay: ReceiptVoucher) => pay.voucher_number
     },
     {
-      key: 'payment_date',
+      key: 'voucher_date',
       label: 'Date',
-      render: (pay: CustomerPayment) => new Date(pay.payment_date).toLocaleDateString()
+      render: (_val: any, pay: ReceiptVoucher) => new Date(pay.voucher_date).toLocaleDateString()
     },
     {
       key: 'customer',
       label: 'Customer',
-      render: (pay: CustomerPayment) => pay.customers?.company_name || 'N/A'
+      render: (_val: any, pay: ReceiptVoucher) => pay.customers?.company_name || 'N/A'
     },
     {
-      key: 'invoice',
-      label: 'Invoice',
-      render: (pay: CustomerPayment) => pay.sales_invoices?.invoice_number || 'N/A'
+      key: 'invoices',
+      label: 'Invoices',
+      render: (_val: any, pay: ReceiptVoucher) => {
+        if (!pay.allocations || pay.allocations.length === 0) return 'Unallocated';
+        return pay.allocations.map(a => a.sales_invoices?.invoice_number || 'N/A').join(', ');
+      }
     },
     {
       key: 'amount',
       label: 'Amount',
-      render: (pay: CustomerPayment) => (
+      render: (_val: any, pay: ReceiptVoucher) => (
         <span className="font-semibold text-green-600">
-          Rp {pay.amount.toLocaleString('id-ID')}
+          Rp {pay.amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </span>
       )
     },
     {
       key: 'method',
       label: 'Method',
-      render: (pay: CustomerPayment) => (
+      render: (_val: any, pay: ReceiptVoucher) => (
         <span className="capitalize">{pay.payment_method.replace('_', ' ')}</span>
       )
     },
     {
       key: 'bank',
       label: 'Bank Account',
-      render: (pay: CustomerPayment) => pay.bank_accounts?.account_name || 'Cash'
+      render: (_val: any, pay: ReceiptVoucher) => {
+        if (pay.bank_accounts) {
+          return pay.bank_accounts.alias || pay.bank_accounts.account_name;
+        }
+        return 'Cash';
+      }
     },
   ];
 
@@ -521,7 +628,7 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
                   <option value="">Select Bank Account</option>
                   {bankAccounts.map((bank) => (
                     <option key={bank.id} value={bank.id}>
-                      {bank.account_name} - {bank.bank_name}
+                      {bank.alias || `${bank.account_name} - ${bank.bank_name}`}
                     </option>
                   ))}
                 </select>
@@ -585,8 +692,8 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
                         <div className="flex-1">
                           <div className="font-medium text-sm">{invoice.invoice_number}</div>
                           <div className="text-xs text-gray-600">Date: {new Date(invoice.invoice_date).toLocaleDateString()}</div>
-                          <div className="text-xs mt-1">Total: Rp {invoice.total_amount.toLocaleString('id-ID')}</div>
-                          <div className="text-xs text-orange-600 font-medium">Balance: Rp {balance.toLocaleString('id-ID')}</div>
+                          <div className="text-xs mt-1">Total: Rp {invoice.total_amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                          <div className="text-xs text-orange-600 font-medium">Balance: Rp {balance.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                         </div>
                       </div>
                       {isSelected && (
@@ -622,18 +729,18 @@ export function ReceivablesManager({ canManage }: { canManage: boolean }) {
               <div className="border-t pt-3 space-y-1">
                 <div className="flex justify-between text-sm">
                   <span className="font-medium">Payment Amount:</span>
-                  <span className="font-bold">Rp {formData.amount.toLocaleString('id-ID')}</span>
+                  <span className="font-bold">Rp {formData.amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Allocated:</span>
                   <span className={Object.values(selectedAllocations).reduce((a,b) => a+b, 0) > formData.amount ? 'text-red-600 font-bold' : 'text-green-600'}>
-                    Rp {Object.values(selectedAllocations).reduce((a,b) => a+b, 0).toLocaleString('id-ID')}
+                    Rp {Object.values(selectedAllocations).reduce((a,b) => a+b, 0).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Unallocated:</span>
                   <span className="text-gray-600">
-                    Rp {(formData.amount - Object.values(selectedAllocations).reduce((a,b) => a+b, 0)).toLocaleString('id-ID')}
+                    Rp {(formData.amount - Object.values(selectedAllocations).reduce((a,b) => a+b, 0)).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
               </div>

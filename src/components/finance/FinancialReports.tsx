@@ -86,17 +86,7 @@ export function FinancialReports({ initialReport = 'trial_balance' }: FinancialR
   ];
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-end gap-3 bg-white rounded-lg shadow-sm border border-gray-200 p-2">
-        <button
-          onClick={loadReport}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-50 text-gray-700 rounded text-xs hover:bg-gray-100"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          {t('refresh', 'Refresh')}
-        </button>
-      </div>
-
+    <div>
       {loading ? (
         <div className="flex justify-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -105,9 +95,11 @@ export function FinancialReports({ initialReport = 'trial_balance' }: FinancialR
         <>
           {reportType === 'trial_balance' && (
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-              <div className="px-3 py-2 border-b bg-gray-50">
-                <h3 className="font-semibold text-sm">{t('trial_balance', 'Trial Balance')}</h3>
-                <p className="text-xs text-gray-500">{t('as_of', 'As of')} {new Date(dateRange.endDate).toLocaleDateString('id-ID')}</p>
+              <div className="px-4 py-3 border-b bg-white">
+                <h3 className="font-bold text-lg text-gray-900">
+                  Trial Balance as of {new Date(dateRange.endDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'numeric', year: 'numeric' })}
+                </h3>
+                <p className="text-xs text-gray-600 mt-0.5">Neraca Saldo per {new Date(dateRange.endDate).toLocaleDateString('id-ID')}</p>
               </div>
               <table className="w-full">
                 <thead className="bg-gray-50">
@@ -155,10 +147,12 @@ export function FinancialReports({ initialReport = 'trial_balance' }: FinancialR
 
           {reportType === 'pnl' && (
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-              <div className="px-3 py-2 border-b bg-gray-50">
-                <h3 className="font-semibold text-sm">{t('pnl', 'Profit & Loss Statement')}</h3>
-                <p className="text-xs text-gray-500">
-                  {t('period', 'Period')}: {new Date(dateRange.startDate).toLocaleDateString('id-ID')} - {new Date(dateRange.endDate).toLocaleDateString('id-ID')}
+              <div className="px-4 py-3 border-b bg-white">
+                <h3 className="font-bold text-lg text-gray-900">
+                  Profit & Loss Statement for period {new Date(dateRange.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'numeric', year: 'numeric' })} - {new Date(dateRange.endDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'numeric', year: 'numeric' })}
+                </h3>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  Laporan Laba Rugi periode {new Date(dateRange.startDate).toLocaleDateString('id-ID')} - {new Date(dateRange.endDate).toLocaleDateString('id-ID')}
                 </p>
                 <p className="text-[10px] text-amber-600 mt-0.5 italic">
                   {t('pnl_note', 'Note: Costs may change as import expenses are updated')}
@@ -218,9 +212,11 @@ export function FinancialReports({ initialReport = 'trial_balance' }: FinancialR
 
           {reportType === 'balance_sheet' && (
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-              <div className="px-3 py-2 border-b bg-gray-50">
-                <h3 className="font-semibold text-sm">{t('balance_sheet', 'Balance Sheet')} (Neraca)</h3>
-                <p className="text-xs text-gray-500">{t('as_of', 'As of')} {new Date(dateRange.endDate).toLocaleDateString('id-ID')}</p>
+              <div className="px-4 py-3 border-b bg-white">
+                <h3 className="font-bold text-lg text-gray-900">
+                  Balance Sheet as of {new Date(dateRange.endDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'numeric', year: 'numeric' })}
+                </h3>
+                <p className="text-xs text-gray-600 mt-0.5">Neraca per {new Date(dateRange.endDate).toLocaleDateString('id-ID')}</p>
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3">
