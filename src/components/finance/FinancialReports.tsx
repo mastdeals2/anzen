@@ -87,23 +87,7 @@ export function FinancialReports({ initialReport = 'trial_balance' }: FinancialR
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3 bg-white rounded-lg shadow-sm border border-gray-200 p-2">
-        <div className="flex gap-1.5">
-          {reportTabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setReportType(tab.id as ReportType)}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition ${
-                reportType === tab.id
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
+      <div className="flex items-center justify-end gap-3 bg-white rounded-lg shadow-sm border border-gray-200 p-2">
         <button
           onClick={loadReport}
           className="flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-50 text-gray-700 rounded text-xs hover:bg-gray-100"
