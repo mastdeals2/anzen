@@ -99,17 +99,17 @@ export function DashboardWidget({
 
   return (
     <div
-      className={`bg-white rounded-lg shadow border ${colors.border} p-4 transition-all hover:shadow-md ${
-        isClickable ? 'cursor-pointer hover:scale-[1.02]' : ''
+      className={`bg-white rounded-lg shadow-sm border ${colors.border} p-3 transition-all hover:shadow-md ${
+        isClickable ? 'cursor-pointer hover:scale-[1.01]' : ''
       } ${fullWidth ? 'col-span-full' : ''}`}
       onClick={onClick}
     >
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-600 truncate mb-1">{title}</p>
+          <p className="text-xs font-medium text-gray-600 truncate mb-1">{title}</p>
 
           {value !== undefined && (
-            <p className={`text-2xl font-bold ${colors.text} mb-1`}>
+            <p className={`text-lg font-bold ${colors.text} mb-0.5`}>
               {typeof value === 'number'
                 ? value.toLocaleString('id-ID')
                 : value}
@@ -121,7 +121,7 @@ export function DashboardWidget({
           )}
 
           {trend && (
-            <div className="flex items-center gap-1 mt-2">
+            <div className="flex items-center gap-1 mt-1">
               <span
                 className={`text-xs font-medium ${
                   trend.direction === 'up' ? 'text-green-600' : 'text-red-600'
@@ -133,12 +133,12 @@ export function DashboardWidget({
             </div>
           )}
 
-          {children && <div className="mt-3">{children}</div>}
+          {children && <div className="mt-2">{children}</div>}
         </div>
 
         {Icon && (
-          <div className={`${colors.icon} p-3 rounded-full flex-shrink-0 ml-3`}>
-            <Icon className={`w-5 h-5 ${colors.text}`} />
+          <div className={`${colors.icon} p-2 rounded-lg flex-shrink-0 ml-2`}>
+            <Icon className={`w-4 h-4 ${colors.text}`} />
           </div>
         )}
       </div>
