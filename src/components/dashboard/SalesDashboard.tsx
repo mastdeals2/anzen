@@ -50,18 +50,55 @@ export function SalesDashboard() {
 
   const loadDashboardData = async () => {
     if (!profile?.id) return;
+    setLoading(true);
 
     try {
       const { data: result, error } = await supabase.rpc('get_sales_dashboard_data', {
         p_user_id: profile.id,
       });
 
-      if (error) throw error;
+      if (error) {
+        console.warn('RPC call failed, using fallback:', error);
+        await loadManualData();
+        return;
+      }
+
       setData(result);
     } catch (error) {
-      console.error('Error loading sales dashboard:', error);
+      console.error('Dashboard error, using fallback:', error);
+      await loadManualData();
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadManualData = async () => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+
+      const [salesData, ordersData, invoicesData] = await Promise.all([
+        supabase.from('sales_invoices').select('total_amount').gte('invoice_date', today),
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('status', 'pending_approval'),
+        supabase.from('sales_invoices').select('*', { count: 'exact', head: true }).in('payment_status', ['pending', 'partial']),
+      ]);
+
+      const salesTotal = salesData.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0;
+
+      setData({
+        sales_today: salesTotal,
+        sales_today_count: salesData.data?.length || 0,
+        pending_quotations: 0,
+        pending_delivery_challans: 0,
+        pending_sales_orders: ordersData.count || 0,
+        unpaid_invoices_count: invoicesData.count || 0,
+        unpaid_invoices_amount: 0,
+        top_customers: [],
+        followups_due: 0,
+        pipeline_summary: [],
+        overdue_actions: 0
+      });
+    } catch (err) {
+      console.error('Manual load failed:', err);
     }
   };
 
