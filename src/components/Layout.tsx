@@ -33,11 +33,37 @@ interface LayoutProps {
   children: React.ReactNode;
 }
 
+const dailyThoughts = [
+  "Excellence is not a destination, it is a continuous journey.",
+  "Quality is never an accident; it is always the result of intelligent effort.",
+  "Success is the sum of small efforts repeated day in and day out.",
+  "The secret of getting ahead is getting started.",
+  "Every accomplishment starts with the decision to try.",
+  "Focus on being productive instead of busy.",
+  "The best way to predict the future is to create it.",
+  "Your commitment to quality defines your success.",
+  "Precision and care in every action builds trust.",
+  "Small steps every day lead to big achievements.",
+  "Discipline is the bridge between goals and accomplishment.",
+  "Every challenge is an opportunity to grow stronger.",
+  "Consistency is the key to excellence.",
+  "Today's efforts are tomorrow's results.",
+  "Trust is earned through consistent quality and integrity.",
+];
+
 export function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [thoughtOfDay, setThoughtOfDay] = useState('');
   const { profile, signOut } = useAuth();
   const { language, setLanguage, t } = useLanguage();
   const { currentPage, setCurrentPage, sidebarCollapsed, setSidebarCollapsed } = useNavigation();
+
+  // Set thought of the day based on current date
+  useEffect(() => {
+    const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000);
+    const thoughtIndex = dayOfYear % dailyThoughts.length;
+    setThoughtOfDay(dailyThoughts[thoughtIndex]);
+  }, []);
 
   // Auto-collapse sidebar for specific pages
   const autoCollapsiblePages = ['crm', 'command-center', 'finance'];
@@ -67,7 +93,7 @@ export function Layout({ children }: LayoutProps) {
     { id: 'command-center', label: 'Command Center', icon: Zap, roles: ['admin', 'sales'] },
     { id: 'tasks', label: 'Tasks', icon: CheckSquare, roles: ['admin', 'accounts', 'sales', 'warehouse'] },
     { id: 'inventory', label: t('nav.inventory'), icon: Warehouse, roles: ['admin', 'warehouse'] },
-    { id: 'settings', label: t('nav.settings'), icon: Settings, roles: ['admin'] },
+    { id: 'settings', label: t('nav.settings'), icon: Settings, roles: ['admin', 'accounts', 'sales'] },
   ];
 
   const visibleMenuItems = menuItems.filter(item =>
@@ -115,9 +141,11 @@ export function Layout({ children }: LayoutProps) {
             const Icon = item.icon;
             const isActive = currentPage === item.id;
             return (
-              <button
+              <a
                 key={item.id}
-                onClick={() => {
+                href={`#${item.id}`}
+                onClick={(e) => {
+                  e.preventDefault();
                   setCurrentPage(item.id);
                   setSidebarOpen(false);
                 }}
@@ -138,7 +166,7 @@ export function Layout({ children }: LayoutProps) {
                     {item.label}
                   </span>
                 )}
-              </button>
+              </a>
             );
           })}
         </nav>
@@ -165,7 +193,16 @@ export function Layout({ children }: LayoutProps) {
               )}
             </div>
 
-            <div className="flex-1" />
+            <div className="flex-1 flex items-center justify-center px-4">
+              <div className="text-center max-w-2xl">
+                <div className="text-sm font-medium text-gray-700 mb-0.5">
+                  Welcome back, {profile?.full_name || profile?.username || 'User'}
+                </div>
+                <div className="text-xs text-gray-500 italic">
+                  "{thoughtOfDay}"
+                </div>
+              </div>
+            </div>
 
             <div className="flex items-center gap-3">
               <NotificationDropdown />
