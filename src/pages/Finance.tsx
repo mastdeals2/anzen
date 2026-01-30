@@ -197,11 +197,14 @@ export function Finance() {
     {
       key: 'expense_category',
       label: 'Category',
-      render: (exp: FinanceExpense) => (
-        <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${categoryConfig[exp.expense_category].color}`}>
-          {categoryConfig[exp.expense_category].label}
-        </span>
-      )
+      render: (exp: FinanceExpense) => {
+        const config = categoryConfig[exp.expense_category] || { label: exp.expense_category || 'Unknown', color: 'bg-gray-100 text-gray-800' };
+        return (
+          <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${config.color}`}>
+            {config.label}
+          </span>
+        );
+      }
     },
     {
       key: 'amount',
