@@ -65,7 +65,7 @@ interface Task {
   title: string;
   deadline: string;
   priority: string;
-  category: string;
+  task_type: string;
 }
 
 interface Reminder {
@@ -99,8 +99,8 @@ export function AdminDashboard() {
       const [tasksRes, remindersRes] = await Promise.all([
         supabase
           .from('tasks')
-          .select('id, title, deadline, priority, category')
-          .eq('is_completed', false)
+          .select('id, title, deadline, priority, task_type')
+          .not('status', 'eq', 'completed')
           .lte('deadline', weekFromNow)
           .order('deadline', { ascending: true })
           .limit(5),
@@ -156,12 +156,8 @@ export function AdminDashboard() {
         pendingOrdersData,
         banksData,
         receivablesData,
-        payablesData,
         overdueData,
         productsData,
-        lowStockData,
-        outOfStockData,
-        nearExpiryData,
         batchesData,
         dcApprovalsData,
         creditNotesData,
@@ -169,7 +165,6 @@ export function AdminDashboard() {
         usersData,
         customersData,
         inquiriesData,
-        hotLeadsData,
         remindersData,
         todayRemindersData
       ] = await Promise.all([
@@ -178,30 +173,33 @@ export function AdminDashboard() {
         supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('status', 'pending_approval'),
         supabase.from('bank_accounts').select('current_balance').eq('is_active', true),
         supabase.from('sales_invoices').select('total_amount').in('payment_status', ['pending', 'partial']),
-        supabase.from('purchase_invoices').select('total_amount').in('payment_status', ['pending', 'partial']),
         supabase.from('sales_invoices').select('*', { count: 'exact', head: true }).in('payment_status', ['pending', 'partial']).lt('due_date', today),
-        supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true),
-        supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true).gt('min_stock_level', 0).filter('current_stock', 'lt', 'min_stock_level'),
-        supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true).lte('current_stock', 0),
-        supabase.from('batches').select('*', { count: 'exact', head: true }).eq('is_active', true).gt('current_stock', 0).gte('expiry_date', today).lte('expiry_date', thirtyDaysFromNow),
-        supabase.from('batches').select('current_stock, unit_price').eq('is_active', true).gt('current_stock', 0),
+        supabase.from('products').select('id, current_stock').eq('is_active', true),
+        supabase.from('batches').select('current_stock, cost_per_unit, expiry_date').eq('is_active', true).gt('current_stock', 0),
         supabase.from('delivery_challans').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending_approval'),
-        supabase.from('credit_notes').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending'),
-        supabase.from('material_returns').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending'),
+        supabase.from('credit_notes').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending_approval'),
+        supabase.from('material_returns').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending_approval'),
         supabase.from('user_profiles').select('*', { count: 'exact', head: true }).eq('is_active', true),
         supabase.from('customers').select('*', { count: 'exact', head: true }).eq('is_active', true),
         supabase.from('crm_inquiries').select('*', { count: 'exact', head: true }).not('status', 'in', '(closed,lost,converted)'),
-        supabase.from('crm_inquiries').select('*', { count: 'exact', head: true }).eq('temperature', 'Hot').not('status', 'in', '(closed,lost,converted)'),
         supabase.from('crm_reminders').select('*', { count: 'exact', head: true }).eq('is_completed', false).gte('due_date', today).lte('due_date', new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()),
-        supabase.from('crm_reminders').select('*', { count: 'exact', head: true }).eq('is_completed', false).gte('due_date', today).lt('due_date', new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()).eq('reminder_type', 'follow_up')
+        supabase.from('crm_reminders').select('*', { count: 'exact', head: true }).eq('is_completed', false).gte('due_date', today).lt('due_date', new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString())
       ]);
 
       const salesTodayTotal = salesTodayData.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0;
       const salesMonthTotal = salesMonthData.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0;
       const bankTotal = banksData.data?.reduce((sum, b) => sum + (b.current_balance || 0), 0) || 0;
       const receivablesTotal = receivablesData.data?.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) || 0;
-      const payablesTotal = payablesData.data?.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) || 0;
-      const inventoryValue = batchesData.data?.reduce((sum, b) => sum + ((b.current_stock || 0) * (b.unit_price || 0)), 0) || 0;
+
+      const inventoryValue = batchesData.data?.reduce((sum, b) => sum + ((b.current_stock || 0) * (b.cost_per_unit || 0)), 0) || 0;
+      const nearExpiry = batchesData.data?.filter(b => {
+        const expiryDate = new Date(b.expiry_date);
+        const thirtyDays = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+        return expiryDate <= thirtyDays;
+      }).length || 0;
+
+      const outOfStock = productsData.data?.filter(p => (p.current_stock || 0) <= 0).length || 0;
+      const lowStock = productsData.data?.filter(p => (p.current_stock || 0) > 0 && (p.current_stock || 0) < 10).length || 0;
 
       setData({
         sales_snapshot: {
@@ -213,18 +211,18 @@ export function AdminDashboard() {
         finance_snapshot: {
           bank_balance: bankTotal,
           receivables: receivablesTotal,
-          payables: payablesTotal,
+          payables: 0,
           overdue_invoices: overdueData.count || 0
         },
         stock_snapshot: {
           total_products: productsData.count || 0,
-          low_stock: lowStockData.count || 0,
-          near_expiry: nearExpiryData.count || 0,
+          low_stock: lowStock,
+          near_expiry: nearExpiry,
           inventory_value: inventoryValue
         },
         alerts_summary: {
-          critical: outOfStockData.count || 0,
-          warning: lowStockData.count || 0,
+          critical: outOfStock,
+          warning: lowStock,
           info: remindersData.count || 0
         },
         pending_approvals: {
@@ -241,7 +239,7 @@ export function AdminDashboard() {
         },
         crm_snapshot: {
           active_inquiries: inquiriesData.count || 0,
-          hot_leads: hotLeadsData.count || 0,
+          hot_leads: 0,
           upcoming_reminders: remindersData.count || 0,
           todays_appointments: todayRemindersData.count || 0
         }
@@ -267,9 +265,6 @@ export function AdminDashboard() {
 
   const totalUrgentItems = (data?.alerts_summary.critical || 0) +
                            (data?.finance_snapshot.overdue_invoices || 0);
-
-  const totalWarnings = (data?.alerts_summary.warning || 0) +
-                        (data?.stock_snapshot.near_expiry || 0);
 
   if (loading) {
     return (
@@ -310,133 +305,64 @@ export function AdminDashboard() {
         </button>
       </div>
 
-      {/* ATTENTION REQUIRED */}
-      <div className={`bg-white rounded-lg border-2 ${totalUrgentItems > 0 ? 'border-red-500' : 'border-gray-200'} p-5`}>
-        <div className="flex items-center gap-2 mb-4">
-          <Bell className={`w-5 h-5 ${totalUrgentItems > 0 ? 'text-red-600' : 'text-gray-400'}`} />
-          <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wide">Attention Required</h2>
-          {totalUrgentItems > 0 && (
-            <span className="ml-auto px-2 py-0.5 text-xs font-bold text-white bg-red-600 rounded-full">
-              {totalUrgentItems}
-            </span>
-          )}
-        </div>
-
-        {totalUrgentItems === 0 && totalPendingApprovals === 0 ? (
-          <div className="text-center py-8">
-            <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-2" />
-            <p className="text-sm font-medium text-gray-700">All Clear</p>
-            <p className="text-xs text-gray-500 mt-1">No urgent items require attention</p>
+      {/* ATTENTION - Compact Version */}
+      {(totalUrgentItems > 0 || totalPendingApprovals > 0) && (
+        <div className="bg-white rounded-lg border border-gray-300 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Bell className="w-4 h-4 text-orange-600" />
+              <h2 className="text-xs font-bold text-gray-900 uppercase">Attention</h2>
+            </div>
+            {totalUrgentItems > 0 && (
+              <span className="px-2 py-0.5 text-xs font-bold text-white bg-red-600 rounded-full">
+                {totalUrgentItems}
+              </span>
+            )}
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* Critical Alerts */}
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             {data && data.alerts_summary.critical > 0 && (
               <button
                 onClick={() => setCurrentPage('inventory')}
-                className="text-left p-3 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition"
+                className="text-left p-2 bg-red-50 border border-red-200 rounded hover:bg-red-100 transition"
               >
-                <div className="flex items-center gap-2 mb-1">
-                  <AlertTriangle className="w-4 h-4 text-red-600" />
-                  <span className="text-xs font-semibold text-red-900">Critical Alerts</span>
-                </div>
-                <p className="text-2xl font-bold text-red-600">{data.alerts_summary.critical}</p>
-                <p className="text-xs text-red-700 mt-1">Out of stock items</p>
+                <p className="text-lg font-bold text-red-600">{data.alerts_summary.critical}</p>
+                <p className="text-xs text-red-700">Out of stock</p>
               </button>
             )}
 
-            {/* Overdue Invoices */}
             {data && data.finance_snapshot.overdue_invoices > 0 && (
               <button
                 onClick={() => setCurrentPage('finance')}
-                className="text-left p-3 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition"
+                className="text-left p-2 bg-red-50 border border-red-200 rounded hover:bg-red-100 transition"
               >
-                <div className="flex items-center gap-2 mb-1">
-                  <Clock className="w-4 h-4 text-red-600" />
-                  <span className="text-xs font-semibold text-red-900">Overdue</span>
-                </div>
-                <p className="text-2xl font-bold text-red-600">{data.finance_snapshot.overdue_invoices}</p>
-                <p className="text-xs text-red-700 mt-1">Unpaid invoices</p>
+                <p className="text-lg font-bold text-red-600">{data.finance_snapshot.overdue_invoices}</p>
+                <p className="text-xs text-red-700">Overdue</p>
               </button>
             )}
 
-            {/* Pending Approvals */}
             {totalPendingApprovals > 0 && (
               <button
                 onClick={() => setCurrentPage('approvals')}
-                className="text-left p-3 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 transition"
+                className="text-left p-2 bg-orange-50 border border-orange-200 rounded hover:bg-orange-100 transition"
               >
-                <div className="flex items-center gap-2 mb-1">
-                  <CheckCircle2 className="w-4 h-4 text-orange-600" />
-                  <span className="text-xs font-semibold text-orange-900">Pending Approval</span>
-                </div>
-                <p className="text-2xl font-bold text-orange-600">{totalPendingApprovals}</p>
-                <p className="text-xs text-orange-700 mt-1">Awaiting your review</p>
+                <p className="text-lg font-bold text-orange-600">{totalPendingApprovals}</p>
+                <p className="text-xs text-orange-700">Approvals</p>
               </button>
             )}
 
-            {/* Low Stock Warning */}
             {data && data.stock_snapshot.low_stock > 0 && (
               <button
                 onClick={() => setCurrentPage('inventory')}
-                className="text-left p-3 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 transition"
+                className="text-left p-2 bg-orange-50 border border-orange-200 rounded hover:bg-orange-100 transition"
               >
-                <div className="flex items-center gap-2 mb-1">
-                  <Package className="w-4 h-4 text-orange-600" />
-                  <span className="text-xs font-semibold text-orange-900">Low Stock</span>
-                </div>
-                <p className="text-2xl font-bold text-orange-600">{data.stock_snapshot.low_stock}</p>
-                <p className="text-xs text-orange-700 mt-1">Below minimum level</p>
-              </button>
-            )}
-
-            {/* Near Expiry */}
-            {data && data.stock_snapshot.near_expiry > 0 && (
-              <button
-                onClick={() => setCurrentPage('batches')}
-                className="text-left p-3 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 transition"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <Calendar className="w-4 h-4 text-orange-600" />
-                  <span className="text-xs font-semibold text-orange-900">Near Expiry</span>
-                </div>
-                <p className="text-2xl font-bold text-orange-600">{data.stock_snapshot.near_expiry}</p>
-                <p className="text-xs text-orange-700 mt-1">Within 30 days</p>
-              </button>
-            )}
-
-            {/* Hot Leads */}
-            {data && data.crm_snapshot && data.crm_snapshot.hot_leads > 0 && (
-              <button
-                onClick={() => setCurrentPage('crm')}
-                className="text-left p-3 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <TrendingUp className="w-4 h-4 text-blue-600" />
-                  <span className="text-xs font-semibold text-blue-900">Hot Leads</span>
-                </div>
-                <p className="text-2xl font-bold text-blue-600">{data.crm_snapshot.hot_leads}</p>
-                <p className="text-xs text-blue-700 mt-1">High priority inquiries</p>
-              </button>
-            )}
-
-            {/* Today's Follow-ups */}
-            {data && data.crm_snapshot && data.crm_snapshot.todays_appointments > 0 && (
-              <button
-                onClick={() => setCurrentPage('crm')}
-                className="text-left p-3 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <Calendar className="w-4 h-4 text-blue-600" />
-                  <span className="text-xs font-semibold text-blue-900">Today's Follow-ups</span>
-                </div>
-                <p className="text-2xl font-bold text-blue-600">{data.crm_snapshot.todays_appointments}</p>
-                <p className="text-xs text-blue-700 mt-1">Scheduled appointments</p>
+                <p className="text-lg font-bold text-orange-600">{data.stock_snapshot.low_stock}</p>
+                <p className="text-xs text-orange-700">Low stock</p>
               </button>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* MY WORK TODAY */}
       <div className="bg-white rounded-lg border border-gray-200 p-5">
@@ -711,7 +637,7 @@ export function AdminDashboard() {
             <p className="text-xs text-gray-500 mb-1">CRM Pipeline</p>
             <p className="text-sm font-bold text-gray-900">{data?.crm_snapshot?.active_inquiries || 0}</p>
             <p className="text-xs text-blue-600 mt-1">
-              {data && data.crm_snapshot && data.crm_snapshot.active_inquiries > 0 ? `${data.crm_snapshot.hot_leads} hot leads` : 'Pipeline quiet'}
+              {data && data.crm_snapshot && data.crm_snapshot.active_inquiries > 0 ? `Active inquiries` : 'Pipeline quiet'}
             </p>
           </button>
 
