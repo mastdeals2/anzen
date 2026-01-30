@@ -41,18 +41,50 @@ export function AccountsDashboard() {
 
   const loadDashboardData = async () => {
     if (!profile?.id) return;
+    setLoading(true);
 
     try {
       const { data: result, error } = await supabase.rpc('get_accounts_dashboard_data', {
         p_user_id: profile.id,
       });
 
-      if (error) throw error;
+      if (error) {
+        console.warn('RPC failed, using fallback:', error);
+        await loadManualData();
+        return;
+      }
+
       setData(result);
     } catch (error) {
-      console.error('Error loading accounts dashboard:', error);
+      console.error('Dashboard error, using fallback:', error);
+      await loadManualData();
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadManualData = async () => {
+    try {
+      const [banksData, receivablesData, payablesData] = await Promise.all([
+        supabase.from('bank_accounts').select('current_balance').eq('is_active', true),
+        supabase.from('sales_invoices').select('total_amount').in('payment_status', ['pending', 'partial']),
+        supabase.from('purchase_invoices').select('total_amount').in('payment_status', ['pending', 'partial'])
+      ]);
+
+      const bankTotal = banksData.data?.reduce((sum, b) => sum + (b.current_balance || 0), 0) || 0;
+      const receivablesTotal = receivablesData.data?.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) || 0;
+      const payablesTotal = payablesData.data?.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) || 0;
+
+      setData({
+        bank_balance: bankTotal,
+        receivables: receivablesTotal,
+        payables: payablesTotal,
+        overdue_invoices: 0,
+        pending_reconciliations: 0,
+        unmatched_transactions: 0
+      });
+    } catch (err) {
+      console.error('Manual load failed:', err);
     }
   };
 

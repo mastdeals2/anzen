@@ -76,26 +76,39 @@ export function SalesDashboard() {
     try {
       const today = new Date().toISOString().split('T')[0];
 
-      const [salesData, ordersData, invoicesData] = await Promise.all([
-        supabase.from('sales_invoices').select('total_amount').gte('invoice_date', today),
+      const [
+        salesData,
+        ordersData,
+        invoicesData,
+        unpaidInvoicesData,
+        dcData,
+        remindersData,
+        inquiriesData
+      ] = await Promise.all([
+        supabase.from('sales_invoices').select('total_amount').eq('invoice_date', today),
         supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('status', 'pending_approval'),
         supabase.from('sales_invoices').select('*', { count: 'exact', head: true }).in('payment_status', ['pending', 'partial']),
+        supabase.from('sales_invoices').select('total_amount').in('payment_status', ['pending', 'partial']),
+        supabase.from('delivery_challans').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending_approval'),
+        supabase.from('crm_reminders').select('*', { count: 'exact', head: true }).eq('is_completed', false).lte('due_date', new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()),
+        supabase.from('crm_inquiries').select('status', { count: 'exact' }).not('status', 'in', '(closed,lost,converted)')
       ]);
 
       const salesTotal = salesData.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0;
+      const unpaidTotal = unpaidInvoicesData.data?.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) || 0;
 
       setData({
         sales_today: salesTotal,
         sales_today_count: salesData.data?.length || 0,
         pending_quotations: 0,
-        pending_delivery_challans: 0,
+        pending_delivery_challans: dcData.count || 0,
         pending_sales_orders: ordersData.count || 0,
         unpaid_invoices_count: invoicesData.count || 0,
-        unpaid_invoices_amount: 0,
+        unpaid_invoices_amount: unpaidTotal,
         top_customers: [],
-        followups_due: 0,
+        followups_due: remindersData.count || 0,
         pipeline_summary: [],
-        overdue_actions: 0
+        overdue_actions: remindersData.count || 0
       });
     } catch (err) {
       console.error('Manual load failed:', err);

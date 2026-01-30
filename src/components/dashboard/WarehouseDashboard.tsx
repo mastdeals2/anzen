@@ -54,18 +54,61 @@ export function WarehouseDashboard() {
 
   const loadDashboardData = async () => {
     if (!profile?.id) return;
+    setLoading(true);
 
     try {
       const { data: result, error } = await supabase.rpc('get_warehouse_dashboard_data', {
         p_user_id: profile.id,
       });
 
-      if (error) throw error;
+      if (error) {
+        console.warn('RPC failed, using fallback:', error);
+        await loadManualData();
+        return;
+      }
+
       setData(result);
     } catch (error) {
-      console.error('Error loading warehouse dashboard:', error);
+      console.error('Dashboard error, using fallback:', error);
+      await loadManualData();
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadManualData = async () => {
+    try {
+      const [
+        productsData,
+        lowStockData,
+        nearExpiryData,
+        batchesData,
+        dcData,
+        soData
+      ] = await Promise.all([
+        supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true),
+        supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true).gt('min_stock_level', 0).filter('current_stock', 'lt', 'min_stock_level'),
+        supabase.from('batches').select('*', { count: 'exact', head: true }).eq('is_active', true).gt('current_stock', 0).gte('expiry_date', new Date().toISOString().split('T')[0]).lte('expiry_date', new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]),
+        supabase.from('batches').select('current_stock, unit_price').eq('is_active', true).gt('current_stock', 0),
+        supabase.from('delivery_challans').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending_approval'),
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('status', 'pending_approval')
+      ]);
+
+      const inventoryValue = batchesData.data?.reduce((sum, b) => sum + ((b.current_stock || 0) * (b.unit_price || 0)), 0) || 0;
+
+      setData({
+        total_products: productsData.count || 0,
+        low_stock_items: lowStockData.count || 0,
+        near_expiry: nearExpiryData.count || 0,
+        pending_dispatch: dcData.count || 0,
+        incoming_stock: soData.count || 0,
+        batch_alerts: nearExpiryData.count || 0,
+        inventory_value: inventoryValue,
+        pick_pack_tasks: 0,
+        stock_rejections: 0
+      });
+    } catch (err) {
+      console.error('Manual load failed:', err);
     }
   };
 

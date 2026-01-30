@@ -60,18 +60,65 @@ interface AdminData {
   };
 }
 
+interface Task {
+  id: string;
+  title: string;
+  deadline: string;
+  priority: string;
+  category: string;
+}
+
+interface Reminder {
+  id: string;
+  title: string;
+  due_date: string;
+  reminder_type: string;
+  inquiry_id?: string;
+}
+
 export function AdminDashboard() {
   const { profile } = useAuth();
   const { setCurrentPage } = useNavigation();
   const [data, setData] = useState<AdminData | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
   const [showFinancials, setShowFinancials] = useState(false);
 
   useEffect(() => {
     if (profile?.id) {
       loadDashboardData();
+      loadTasksAndReminders();
     }
   }, [profile?.id]);
+
+  const loadTasksAndReminders = async () => {
+    try {
+      const weekFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+      const [tasksRes, remindersRes] = await Promise.all([
+        supabase
+          .from('tasks')
+          .select('id, title, deadline, priority, category')
+          .eq('is_completed', false)
+          .lte('deadline', weekFromNow)
+          .order('deadline', { ascending: true })
+          .limit(5),
+        supabase
+          .from('crm_reminders')
+          .select('id, title, due_date, reminder_type, inquiry_id')
+          .eq('is_completed', false)
+          .lte('due_date', weekFromNow)
+          .order('due_date', { ascending: true })
+          .limit(5)
+      ]);
+
+      if (tasksRes.data) setTasks(tasksRes.data);
+      if (remindersRes.data) setReminders(remindersRes.data);
+    } catch (error) {
+      console.error('Error loading tasks/reminders:', error);
+    }
+  };
 
   const loadDashboardData = async () => {
     if (!profile?.id) return;
@@ -100,58 +147,103 @@ export function AdminDashboard() {
   const loadManualData = async () => {
     try {
       const today = new Date().toISOString().split('T')[0];
+      const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+      const thirtyDaysFromNow = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
-      const [salesData, ordersData, banksData, invData] = await Promise.all([
-        supabase.from('sales_invoices').select('total_amount').gte('invoice_date', today),
+      const [
+        salesTodayData,
+        salesMonthData,
+        pendingOrdersData,
+        banksData,
+        receivablesData,
+        payablesData,
+        overdueData,
+        productsData,
+        lowStockData,
+        outOfStockData,
+        nearExpiryData,
+        batchesData,
+        dcApprovalsData,
+        creditNotesData,
+        materialReturnsData,
+        usersData,
+        customersData,
+        inquiriesData,
+        hotLeadsData,
+        remindersData,
+        todayRemindersData
+      ] = await Promise.all([
+        supabase.from('sales_invoices').select('total_amount').eq('invoice_date', today),
+        supabase.from('sales_invoices').select('total_amount').gte('invoice_date', firstDayOfMonth),
         supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('status', 'pending_approval'),
         supabase.from('bank_accounts').select('current_balance').eq('is_active', true),
+        supabase.from('sales_invoices').select('total_amount').in('payment_status', ['pending', 'partial']),
+        supabase.from('purchase_invoices').select('total_amount').in('payment_status', ['pending', 'partial']),
+        supabase.from('sales_invoices').select('*', { count: 'exact', head: true }).in('payment_status', ['pending', 'partial']).lt('due_date', today),
         supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true),
+        supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true).gt('min_stock_level', 0).filter('current_stock', 'lt', 'min_stock_level'),
+        supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true).lte('current_stock', 0),
+        supabase.from('batches').select('*', { count: 'exact', head: true }).eq('is_active', true).gt('current_stock', 0).gte('expiry_date', today).lte('expiry_date', thirtyDaysFromNow),
+        supabase.from('batches').select('current_stock, unit_price').eq('is_active', true).gt('current_stock', 0),
+        supabase.from('delivery_challans').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending_approval'),
+        supabase.from('credit_notes').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending'),
+        supabase.from('material_returns').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending'),
+        supabase.from('user_profiles').select('*', { count: 'exact', head: true }).eq('is_active', true),
+        supabase.from('customers').select('*', { count: 'exact', head: true }).eq('is_active', true),
+        supabase.from('crm_inquiries').select('*', { count: 'exact', head: true }).not('status', 'in', '(closed,lost,converted)'),
+        supabase.from('crm_inquiries').select('*', { count: 'exact', head: true }).eq('temperature', 'Hot').not('status', 'in', '(closed,lost,converted)'),
+        supabase.from('crm_reminders').select('*', { count: 'exact', head: true }).eq('is_completed', false).gte('due_date', today).lte('due_date', new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()),
+        supabase.from('crm_reminders').select('*', { count: 'exact', head: true }).eq('is_completed', false).gte('due_date', today).lt('due_date', new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()).eq('reminder_type', 'follow_up')
       ]);
 
-      const salesTotal = salesData.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0;
+      const salesTodayTotal = salesTodayData.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0;
+      const salesMonthTotal = salesMonthData.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0;
       const bankTotal = banksData.data?.reduce((sum, b) => sum + (b.current_balance || 0), 0) || 0;
+      const receivablesTotal = receivablesData.data?.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) || 0;
+      const payablesTotal = payablesData.data?.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) || 0;
+      const inventoryValue = batchesData.data?.reduce((sum, b) => sum + ((b.current_stock || 0) * (b.unit_price || 0)), 0) || 0;
 
       setData({
         sales_snapshot: {
-          today_revenue: salesTotal,
-          today_count: salesData.data?.length || 0,
-          month_revenue: salesTotal,
-          pending_orders: ordersData.count || 0
+          today_revenue: salesTodayTotal,
+          today_count: salesTodayData.data?.length || 0,
+          month_revenue: salesMonthTotal,
+          pending_orders: pendingOrdersData.count || 0
         },
         finance_snapshot: {
           bank_balance: bankTotal,
-          receivables: 0,
-          payables: 0,
-          overdue_invoices: 0
+          receivables: receivablesTotal,
+          payables: payablesTotal,
+          overdue_invoices: overdueData.count || 0
         },
         stock_snapshot: {
-          total_products: invData.count || 0,
-          low_stock: 0,
-          near_expiry: 0,
-          inventory_value: 0
+          total_products: productsData.count || 0,
+          low_stock: lowStockData.count || 0,
+          near_expiry: nearExpiryData.count || 0,
+          inventory_value: inventoryValue
         },
         alerts_summary: {
-          critical: 0,
-          warning: 0,
-          info: 0
+          critical: outOfStockData.count || 0,
+          warning: lowStockData.count || 0,
+          info: remindersData.count || 0
         },
         pending_approvals: {
-          sales_orders: ordersData.count || 0,
-          delivery_challans: 0,
-          credit_notes: 0,
-          material_returns: 0
+          sales_orders: pendingOrdersData.count || 0,
+          delivery_challans: dcApprovalsData.count || 0,
+          credit_notes: creditNotesData.count || 0,
+          material_returns: materialReturnsData.count || 0
         },
         system_health: {
-          active_users: 0,
-          active_customers: 0,
-          active_products: invData.count || 0,
+          active_users: usersData.count || 0,
+          active_customers: customersData.count || 0,
+          active_products: productsData.count || 0,
           unread_notifications: 0
         },
         crm_snapshot: {
-          active_inquiries: 0,
-          hot_leads: 0,
-          upcoming_reminders: 0,
-          todays_appointments: 0
+          active_inquiries: inquiriesData.count || 0,
+          hot_leads: hotLeadsData.count || 0,
+          upcoming_reminders: remindersData.count || 0,
+          todays_appointments: todayRemindersData.count || 0
         }
       });
     } catch (err) {
@@ -350,80 +442,218 @@ export function AdminDashboard() {
       <div className="bg-white rounded-lg border border-gray-200 p-5">
         <div className="flex items-center gap-2 mb-4">
           <Clock className="w-5 h-5 text-gray-600" />
-          <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wide">Pending Approvals</h2>
+          <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wide">My Work Today</h2>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          {data && data.pending_approvals.sales_orders > 0 && (
-            <button
-              onClick={() => setCurrentPage('approvals')}
-              className="text-left p-3 bg-gray-50 rounded border border-gray-200 hover:bg-gray-100 transition"
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <FileText className="w-4 h-4 text-gray-600" />
-                <span className="text-xs font-semibold text-gray-700">Sales Orders</span>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Tasks */}
+          <div>
+            <h3 className="text-xs font-semibold text-gray-700 mb-2">Upcoming Tasks</h3>
+            {tasks.length > 0 ? (
+              <div className="space-y-2">
+                {tasks.map((task) => {
+                  const isOverdue = new Date(task.deadline) < new Date();
+                  return (
+                    <button
+                      key={task.id}
+                      onClick={() => setCurrentPage('tasks')}
+                      className="w-full text-left p-2.5 bg-gray-50 rounded border border-gray-200 hover:bg-gray-100 transition"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-gray-900 truncate">{task.title}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${
+                              task.priority === 'high' ? 'bg-red-100 text-red-700' :
+                              task.priority === 'medium' ? 'bg-orange-100 text-orange-700' :
+                              'bg-gray-100 text-gray-700'
+                            }`}>
+                              {task.priority}
+                            </span>
+                            <span className={`text-xs ${isOverdue ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
+                              {new Date(task.deadline).toLocaleDateString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-              <p className="text-2xl font-bold text-gray-900">{data.pending_approvals.sales_orders}</p>
-            </button>
-          )}
-
-          {data && data.pending_approvals.delivery_challans > 0 && (
-            <button
-              onClick={() => setCurrentPage('approvals')}
-              className="text-left p-3 bg-gray-50 rounded border border-gray-200 hover:bg-gray-100 transition"
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <Package className="w-4 h-4 text-gray-600" />
-                <span className="text-xs font-semibold text-gray-700">Delivery Challans</span>
+            ) : (
+              <div className="text-center py-6 bg-gray-50 rounded border border-gray-200">
+                <CheckCircle2 className="w-8 h-8 text-green-500 mx-auto mb-1" />
+                <p className="text-xs text-gray-600">You're clear today</p>
+                <p className="text-xs text-gray-400 mt-1">Consider reviewing pipeline</p>
               </div>
-              <p className="text-2xl font-bold text-gray-900">{data.pending_approvals.delivery_challans}</p>
-            </button>
-          )}
+            )}
+          </div>
 
-          {data && data.pending_approvals.credit_notes > 0 && (
-            <button
-              onClick={() => setCurrentPage('approvals')}
-              className="text-left p-3 bg-gray-50 rounded border border-gray-200 hover:bg-gray-100 transition"
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <FileText className="w-4 h-4 text-gray-600" />
-                <span className="text-xs font-semibold text-gray-700">Credit Notes</span>
+          {/* Reminders & Appointments */}
+          <div>
+            <h3 className="text-xs font-semibold text-gray-700 mb-2">Follow-ups & Reminders</h3>
+            {reminders.length > 0 ? (
+              <div className="space-y-2">
+                {reminders.map((reminder) => {
+                  const isToday = new Date(reminder.due_date).toDateString() === new Date().toDateString();
+                  return (
+                    <button
+                      key={reminder.id}
+                      onClick={() => setCurrentPage('crm')}
+                      className="w-full text-left p-2.5 bg-gray-50 rounded border border-gray-200 hover:bg-gray-100 transition"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-gray-900 truncate">{reminder.title}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${
+                              isToday ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                            }`}>
+                              {reminder.reminder_type}
+                            </span>
+                            <span className={`text-xs ${isToday ? 'text-blue-600 font-semibold' : 'text-gray-500'}`}>
+                              {new Date(reminder.due_date).toLocaleDateString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-              <p className="text-2xl font-bold text-gray-900">{data.pending_approvals.credit_notes}</p>
-            </button>
-          )}
-
-          {data && data.pending_approvals.material_returns > 0 && (
-            <button
-              onClick={() => setCurrentPage('approvals')}
-              className="text-left p-3 bg-gray-50 rounded border border-gray-200 hover:bg-gray-100 transition"
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <FileText className="w-4 h-4 text-gray-600" />
-                <span className="text-xs font-semibold text-gray-700">Material Returns</span>
+            ) : (
+              <div className="text-center py-6 bg-gray-50 rounded border border-gray-200">
+                <Calendar className="w-8 h-8 text-gray-400 mx-auto mb-1" />
+                <p className="text-xs text-gray-600">No appointments</p>
+                <p className="text-xs text-gray-400 mt-1">Schedule follow-ups</p>
               </div>
-              <p className="text-2xl font-bold text-gray-900">{data.pending_approvals.material_returns}</p>
-            </button>
-          )}
+            )}
+          </div>
 
-          {totalPendingApprovals === 0 && (
-            <div className="col-span-full text-center py-8 bg-gray-50 rounded border border-gray-200">
-              <CheckCircle2 className="w-10 h-10 text-green-500 mx-auto mb-2" />
-              <p className="text-sm font-medium text-gray-700">All Clear</p>
-              <p className="text-xs text-gray-500 mt-1">No pending approvals</p>
+          {/* Approvals Queue */}
+          <div>
+            <h3 className="text-xs font-semibold text-gray-700 mb-2">Pending Approvals</h3>
+            <div className="space-y-2">
+              {data && data.pending_approvals.sales_orders > 0 && (
+                <button
+                  onClick={() => setCurrentPage('approvals')}
+                  className="w-full flex items-center justify-between p-2.5 bg-gray-50 rounded border border-gray-200 hover:bg-gray-100 transition"
+                >
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-3.5 h-3.5 text-gray-600" />
+                    <span className="text-xs text-gray-700">Sales Orders</span>
+                  </div>
+                  <span className="text-sm font-bold text-gray-900">{data.pending_approvals.sales_orders}</span>
+                </button>
+              )}
+
+              {data && data.pending_approvals.delivery_challans > 0 && (
+                <button
+                  onClick={() => setCurrentPage('approvals')}
+                  className="w-full flex items-center justify-between p-2.5 bg-gray-50 rounded border border-gray-200 hover:bg-gray-100 transition"
+                >
+                  <div className="flex items-center gap-2">
+                    <Package className="w-3.5 h-3.5 text-gray-600" />
+                    <span className="text-xs text-gray-700">Delivery Challans</span>
+                  </div>
+                  <span className="text-sm font-bold text-gray-900">{data.pending_approvals.delivery_challans}</span>
+                </button>
+              )}
+
+              {data && data.pending_approvals.credit_notes > 0 && (
+                <button
+                  onClick={() => setCurrentPage('approvals')}
+                  className="w-full flex items-center justify-between p-2.5 bg-gray-50 rounded border border-gray-200 hover:bg-gray-100 transition"
+                >
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-3.5 h-3.5 text-gray-600" />
+                    <span className="text-xs text-gray-700">Credit Notes</span>
+                  </div>
+                  <span className="text-sm font-bold text-gray-900">{data.pending_approvals.credit_notes}</span>
+                </button>
+              )}
+
+              {data && data.pending_approvals.material_returns > 0 && (
+                <button
+                  onClick={() => setCurrentPage('approvals')}
+                  className="w-full flex items-center justify-between p-2.5 bg-gray-50 rounded border border-gray-200 hover:bg-gray-100 transition"
+                >
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-3.5 h-3.5 text-gray-600" />
+                    <span className="text-xs text-gray-700">Material Returns</span>
+                  </div>
+                  <span className="text-sm font-bold text-gray-900">{data.pending_approvals.material_returns}</span>
+                </button>
+              )}
+
+              {totalPendingApprovals === 0 && (
+                <div className="text-center py-6 bg-gray-50 rounded border border-gray-200">
+                  <CheckCircle2 className="w-8 h-8 text-green-500 mx-auto mb-1" />
+                  <p className="text-xs text-gray-600">All approved</p>
+                  <p className="text-xs text-gray-400 mt-1">No pending reviews</p>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       </div>
 
-      {/* SYSTEM OVERVIEW */}
+      {/* QUICK ACTIONS - Show when dashboard is calm */}
+      {totalUrgentItems === 0 && totalPendingApprovals === 0 && tasks.length === 0 && reminders.length === 0 && (
+        <div className="bg-gradient-to-r from-blue-50 to-green-50 rounded-lg border border-blue-200 p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <TrendingUp className="w-5 h-5 text-blue-600" />
+            <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wide">Quick Actions</h2>
+            <span className="ml-auto text-xs text-gray-500">All clear - stay productive</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            <button
+              onClick={() => setCurrentPage('crm')}
+              className="p-3 bg-white rounded-lg border border-gray-200 hover:border-blue-400 hover:shadow-sm transition text-left"
+            >
+              <Users className="w-4 h-4 text-blue-600 mb-1" />
+              <p className="text-xs font-medium text-gray-900">New Inquiry</p>
+            </button>
+            <button
+              onClick={() => setCurrentPage('tasks')}
+              className="p-3 bg-white rounded-lg border border-gray-200 hover:border-blue-400 hover:shadow-sm transition text-left"
+            >
+              <CheckCircle2 className="w-4 h-4 text-green-600 mb-1" />
+              <p className="text-xs font-medium text-gray-900">Add Task</p>
+            </button>
+            <button
+              onClick={() => setCurrentPage('finance')}
+              className="p-3 bg-white rounded-lg border border-gray-200 hover:border-blue-400 hover:shadow-sm transition text-left"
+            >
+              <FileText className="w-4 h-4 text-orange-600 mb-1" />
+              <p className="text-xs font-medium text-gray-900">Record Expense</p>
+            </button>
+            <button
+              onClick={() => setCurrentPage('sales')}
+              className="p-3 bg-white rounded-lg border border-gray-200 hover:border-blue-400 hover:shadow-sm transition text-left"
+            >
+              <FileText className="w-4 h-4 text-gray-600 mb-1" />
+              <p className="text-xs font-medium text-gray-900">Create Invoice</p>
+            </button>
+            <button
+              onClick={() => setCurrentPage('crm')}
+              className="p-3 bg-white rounded-lg border border-gray-200 hover:border-blue-400 hover:shadow-sm transition text-left"
+            >
+              <TrendingUp className="w-4 h-4 text-gray-600 mb-1" />
+              <p className="text-xs font-medium text-gray-900">View Pipeline</p>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* SYSTEM INSIGHTS */}
       <div className="bg-gray-50 rounded-lg border border-gray-200 p-5">
         <div className="flex items-center gap-2 mb-4">
           <Package className="w-4 h-4 text-gray-500" />
-          <h2 className="text-xs font-bold text-gray-700 uppercase tracking-wide">System Overview</h2>
+          <h2 className="text-xs font-bold text-gray-700 uppercase tracking-wide">System Insights</h2>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           {/* Sales Today */}
           <button onClick={() => setCurrentPage('sales')} className="text-left p-3 bg-white rounded border border-gray-200 hover:shadow-sm transition">
             <p className="text-xs text-gray-500 mb-1">Sales Today</p>
@@ -432,7 +662,9 @@ export function AdminDashboard() {
             ) : (
               <p className="text-sm font-bold text-gray-400">• • • • •</p>
             )}
-            <p className="text-xs text-gray-500 mt-1">{data?.sales_snapshot.today_count || 0} invoices</p>
+            <p className="text-xs text-green-600 mt-1">
+              {data?.sales_snapshot.today_count || 0 > 0 ? `${data?.sales_snapshot.today_count} invoices` : 'No sales yet'}
+            </p>
           </button>
 
           {/* Bank Balance */}
@@ -443,7 +675,9 @@ export function AdminDashboard() {
             ) : (
               <p className="text-sm font-bold text-gray-400">• • • • •</p>
             )}
-            <p className="text-xs text-gray-500 mt-1">All accounts</p>
+            <p className="text-xs text-blue-600 mt-1">
+              {data && data.finance_snapshot.bank_balance > 0 ? 'Healthy' : 'Check balance'}
+            </p>
           </button>
 
           {/* Receivables */}
@@ -454,10 +688,12 @@ export function AdminDashboard() {
             ) : (
               <p className="text-sm font-bold text-gray-400">• • • • •</p>
             )}
-            <p className="text-xs text-gray-500 mt-1">Outstanding</p>
+            <p className="text-xs text-orange-600 mt-1">
+              {data && data.finance_snapshot.receivables > 0 ? 'Track collection' : 'All clear'}
+            </p>
           </button>
 
-          {/* Inventory Value */}
+          {/* Inventory */}
           <button onClick={() => setCurrentPage('inventory')} className="text-left p-3 bg-white rounded border border-gray-200 hover:shadow-sm transition">
             <p className="text-xs text-gray-500 mb-1">Inventory</p>
             {showFinancials ? (
@@ -465,21 +701,25 @@ export function AdminDashboard() {
             ) : (
               <p className="text-sm font-bold text-gray-400">• • • • •</p>
             )}
-            <p className="text-xs text-gray-500 mt-1">{data?.stock_snapshot.total_products || 0} products</p>
+            <p className="text-xs text-green-600 mt-1">
+              {data && data.stock_snapshot.low_stock === 0 ? 'Stock stable' : `${data?.stock_snapshot.low_stock} low`}
+            </p>
           </button>
 
-          {/* Active Inquiries */}
+          {/* CRM Pipeline */}
           <button onClick={() => setCurrentPage('crm')} className="text-left p-3 bg-white rounded border border-gray-200 hover:shadow-sm transition">
             <p className="text-xs text-gray-500 mb-1">CRM Pipeline</p>
             <p className="text-sm font-bold text-gray-900">{data?.crm_snapshot?.active_inquiries || 0}</p>
-            <p className="text-xs text-gray-500 mt-1">Active inquiries</p>
+            <p className="text-xs text-blue-600 mt-1">
+              {data && data.crm_snapshot && data.crm_snapshot.active_inquiries > 0 ? `${data.crm_snapshot.hot_leads} hot leads` : 'Pipeline quiet'}
+            </p>
           </button>
 
-          {/* Active Users */}
+          {/* System Health */}
           <button onClick={() => setCurrentPage('settings')} className="text-left p-3 bg-white rounded border border-gray-200 hover:shadow-sm transition">
-            <p className="text-xs text-gray-500 mb-1">System Health</p>
-            <p className="text-sm font-bold text-gray-900">{data?.system_health.active_users || 0}</p>
-            <p className="text-xs text-gray-500 mt-1">Active users</p>
+            <p className="text-xs text-gray-500 mb-1">System</p>
+            <p className="text-sm font-bold text-gray-900">{data?.system_health.active_users || 0} users</p>
+            <p className="text-xs text-green-600 mt-1">Running normally</p>
           </button>
         </div>
       </div>
